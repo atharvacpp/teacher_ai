@@ -353,6 +353,50 @@ body {
   cursor: not-allowed;
 }
 
+/* ---------- Microphone Button ---------- */
+.mic-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1.5px solid rgba(139, 92, 246, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.mic-button:hover:not(:disabled):not(.mic-button--recording) {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px var(--color-primary-glow);
+}
+
+/* Active recording state — red glow */
+.mic-button--recording {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2), 0 0 20px rgba(239, 68, 68, 0.25);
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
+.mic-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* ---------- Animations ---------- */
 @keyframes fadeSlideIn {
   from {
@@ -373,6 +417,15 @@ body {
   50% {
     opacity: 1;
     transform: scale(1.1);
+  }
+}
+
+@keyframes micPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2), 0 0 20px rgba(239, 68, 68, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.1), 0 0 30px rgba(239, 68, 68, 0.35);
   }
 }
 

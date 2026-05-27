@@ -1,0 +1,75 @@
+# =============================================================================
+# .gitignore — ExplainAI Full-Stack Project
+# =============================================================================
+# REMINDER: Keep this file updated as new features, tools, or dependencies
+# are added to the project. Each new phase may introduce files that should
+# not be committed (temp data, model caches, build artefacts, etc.).
+# =============================================================================
+
+# ---------- Environment & Secrets ----------
+# NEVER commit API keys or secrets to version control
+.env
+.env.*
+!.env.example
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# ---------- Node / Frontend ----------
+node_modules/
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# ---------- Temporary Audio Files ----------
+# Recordings or transcriptions generated during development
+*.webm
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+recordings/
+temp_audio/
+debug/
+
+# ---------- OS Files ----------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ---------- IDE / Editor ----------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ---------- Miscellaneous ----------
+*.log
+*.bak
+*.tmp

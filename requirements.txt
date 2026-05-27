@@ -1,5 +1,5 @@
 # =============================================================================
-# requirements.txt — ExplainAI Backend (Phase 1)
+# requirements.txt — ExplainAI Backend (Phase 2)
 # =============================================================================
 # Install all dependencies with:  pip install -r requirements.txt
 # =============================================================================
@@ -11,9 +11,15 @@ uvicorn>=0.30.0           # Lightning-fast ASGI server to run FastAPI
 # --- AI / Model Integration ---
 huggingface_hub>=0.25.0   # Official Hugging Face client (InferenceClient)
 
+# --- File Upload Support ---
+python-multipart>=0.0.9   # Required by FastAPI for UploadFile / form data
+
 # --- Configuration & Security ---
 python-dotenv>=1.0.0      # Load environment variables from .env files
 
 # --- Pulled in automatically by FastAPI, pinned here for reproducibility ---
 pydantic>=2.9.0           # Data validation and request/response schemas
 starlette>=0.40.0         # ASGI toolkit (CORS middleware, routing, etc.)
+
+# --- Text-to-Speech ---
+gTTS>=2.5.0               # Offline reliable TTS audio generation
