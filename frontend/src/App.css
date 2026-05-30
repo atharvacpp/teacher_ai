@@ -276,16 +276,262 @@ body {
   animation: pulse 1s ease-in-out infinite;
 }
 
-/* ---------- Input Area ---------- */
+/* ---------- Stop Generation Button ---------- */
+.stop-button {
+  margin-left: auto;
+  padding: 0.3rem 0.75rem;
+  border: 1.5px solid rgba(239, 68, 68, 0.5);
+  border-radius: var(--radius-full);
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-style: normal;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.stop-button:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #fca5a5;
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+}
+
+.stop-button:active {
+  transform: translateY(0);
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* ---------- Input & Attachment Area ---------- */
+.chat-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0.4rem 0.8rem;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  max-width: max-content;
+}
+
+.attachment-chip__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 250px;
+}
+
+.attachment-chip__remove {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  transition: color var(--transition-fast);
+}
+
+.attachment-chip__remove:hover {
+  color: #ef4444;
+}
+
+/* ---------- Attachment Bar (chip + toggle row) ---------- */
+.attachment-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin: var(--space-sm) var(--space-xl) 0 var(--space-xl);
+  animation: fadeSlideIn var(--transition-fast) ease-out both;
+}
+
+/* ---------- Vision / Handwriting Toggle Switch ---------- */
+.vision-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.35rem 0.7rem 0.35rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.vision-toggle:hover {
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.vision-toggle--active {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.15);
+}
+
+/* Hidden native checkbox */
+.vision-toggle__input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Track */
+.vision-toggle__track {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.vision-toggle__slider {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  transition:
+    background var(--transition-base),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base);
+}
+
+/* Slider knob */
+.vision-toggle__slider::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  transition:
+    transform var(--transition-base),
+    background var(--transition-base),
+    box-shadow var(--transition-base);
+}
+
+/* Active track */
+.vision-toggle__input:checked + .vision-toggle__slider {
+  background: rgba(139, 92, 246, 0.3);
+  border-color: var(--color-primary);
+}
+
+/* Active knob — slides right */
+.vision-toggle__input:checked + .vision-toggle__slider::after {
+  transform: translateX(16px);
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary-glow);
+}
+
+/* Label text */
+.vision-toggle__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.vision-toggle--active .vision-toggle__label {
+  color: var(--color-text);
+}
+
+.vision-toggle__icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+}
+
+.vision-toggle--active .vision-toggle__icon {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* "Slower" badge */
+.vision-toggle__badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-full);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+}
+
+.file-attach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1.5px solid rgba(139, 92, 246, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.file-attach-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px var(--color-primary-glow);
+}
+
+.file-attach-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .chat-input-area {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-xl);
-  background: var(--color-surface);
-
-  /* No harsh top border — use a very subtle separator */
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: transparent;
 }
 
 .chat-input {
@@ -395,6 +641,156 @@ body {
 .mic-button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* ---------- YouTube Button ---------- */
+.youtube-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.youtube-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+}
+
+.youtube-btn--active {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.2);
+}
+
+.youtube-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ---------- YouTube URL Input Bar ---------- */
+.youtube-input-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 var(--space-xl);
+  padding: 0.55rem 0.75rem;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-md);
+  animation: fadeSlideIn var(--transition-fast) ease-out both;
+}
+
+.youtube-input-bar__icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.youtube-input-bar__input {
+  flex: 1;
+  padding: 0.45rem 0.75rem;
+  border: 1.5px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  outline: none;
+  min-width: 0;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.youtube-input-bar__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.youtube-input-bar__input:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.youtube-input-bar__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.youtube-input-bar__submit {
+  padding: 0.45rem 1rem;
+  border: none;
+  border-radius: var(--radius-full);
+  background: #ef4444;
+  color: #fff;
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.youtube-input-bar__submit:hover:not(:disabled) {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
+}
+
+.youtube-input-bar__submit:active:not(:disabled) {
+  transform: translateY(0);
+  background: #b91c1c;
+}
+
+.youtube-input-bar__submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.youtube-input-bar__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.youtube-input-bar__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ef4444;
 }
 
 /* ---------- Animations ---------- */

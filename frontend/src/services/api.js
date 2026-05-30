@@ -4,10 +4,32 @@
  * Handles all HTTP communication with the FastAPI backend.
  * Centralised here so every component can import a single, clean function
  * instead of scattering fetch logic throughout the UI code.
+ *
+ * Supports AbortController for the "Stop Generation" feature — any
+ * in-flight /chat or /upload request can be cancelled by calling
+ * abortActiveRequest().
  */
 
 // Base URL of the FastAPI backend (runs locally on port 8000)
 const API_BASE_URL = "http://127.0.0.1:8000";
+
+// ---------------------------------------------------------------------------
+// Abort Controller (shared across chat & upload)
+// ---------------------------------------------------------------------------
+
+/** @type {AbortController | null} */
+let activeController = null;
+
+/**
+ * Abort the currently in-flight /chat or /upload request (if any).
+ * Called by the "Stop ⏹" button in ChatInterface.
+ */
+export function abortActiveRequest() {
+  if (activeController) {
+    activeController.abort();
+    activeController = null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // POST /chat — send conversation history, get AI explanation
@@ -19,15 +41,20 @@ const API_BASE_URL = "http://127.0.0.1:8000";
  *
  * @param {Array<{role: string, content: string}>} chatHistory - The full
  *   conversation so far (user + assistant messages).
- * @returns {Promise<string>} - The AI-generated explanation text.
+ * @returns {Promise<{explanation: string, audio_base64: string|null}>}
  * @throws {Error} - Re-throws with a user-friendly message on failure.
  */
 export async function sendChatMessage(chatHistory) {
+  // Create a fresh controller for this request
+  activeController = new AbortController();
+  const { signal } = activeController;
+
   try {
     const response = await fetch(`${API_BASE_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: chatHistory }),
+      signal,
     });
 
     // If the backend returned an error status, surface the detail message
@@ -40,12 +67,16 @@ export async function sendChatMessage(chatHistory) {
 
     const data = await response.json();
 
-    // Return the full object which now includes { explanation, audio_url }
+    // Return the full object which now includes { explanation, audio_base64 }
     return data;
   } catch (error) {
-    // Network failures, JSON parse errors, etc.
+    if (error.name === "AbortError") {
+      throw new Error("Generation stopped by user.");
+    }
     console.error("[api] sendChatMessage failed:", error);
     throw error;
+  } finally {
+    activeController = null;
   }
 }
 
@@ -125,5 +156,105 @@ export async function transcribeAudio(audioBlob) {
     throw error;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /upload — send file and optional prompt
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload a file (image or PDF) along with an optional text prompt.
+ *
+ * @param {File} file - The file to upload.
+ * @param {string} prompt - Optional text prompt to accompany the file.
+ * @param {boolean} forceVision - When true, forces the backend to process
+ *   the PDF through the LLaVA → Qwen vision pipeline instead of plain-text
+ *   extraction.  Useful for hybrid PDFs containing handwriting.
+ * @returns {Promise<{explanation: string, audio_base64: string}>} - The AI's response.
+ */
+export async function uploadFile(file, prompt = "", forceVision = false) {
+  // Create a fresh controller for this request
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (prompt && prompt.trim() !== "") {
+      formData.append("prompt", prompt.trim());
+    }
+    // Tell the backend whether to route through the vision pipeline
+    formData.append("force_vision", forceVision ? "true" : "false");
+
+    // Determine the API endpoint based on file type (Phase 4 Local Video support)
+    const endpoint = file.type.startsWith("video/") ? "/video/upload" : "/upload";
+
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: "POST",
+      body: formData,
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        errorData?.detail || `Upload failed (${response.status})`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Generation stopped by user.");
+    }
+    console.error("[api] uploadFile failed:", error);
+    throw error;
+  } finally {
+    activeController = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /youtube — send YouTube URL, get AI explanation of the transcript
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a YouTube URL to the /youtube endpoint.  The backend fetches the
+ * video transcript and returns an AI-generated summary / explanation.
+ *
+ * @param {string} url - A YouTube video URL.
+ * @returns {Promise<{explanation: string, audio_base64: string|null}>}
+ * @throws {Error} - Re-throws with a user-friendly message on failure.
+ */
+export async function processYouTubeVideo(url) {
+  // Create a fresh controller for this request
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/youtube`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        errorData?.detail || `YouTube processing failed (${response.status})`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Generation stopped by user.");
+    }
+    console.error("[api] processYouTubeVideo failed:", error);
+    throw error;
+  } finally {
+    activeController = null;
   }
 }

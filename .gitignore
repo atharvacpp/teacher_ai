@@ -1,5 +1,5 @@
 # =============================================================================
-# .gitignore — ExplainAI Full-Stack Project
+# .gitignore — ExplainAI Full-Stack Project (Phase 4)
 # =============================================================================
 # REMINDER: Keep this file updated as new features, tools, or dependencies
 # are added to the project. Each new phase may introduce files that should
@@ -28,6 +28,11 @@ build/
 venv/
 ENV/
 
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
 # ---------- Node / Frontend ----------
 node_modules/
 frontend/node_modules/
@@ -41,17 +46,30 @@ frontend/dist/
 frontend/dist-ssr/
 *.local
 
-# ---------- Temporary Audio Files ----------
-# Recordings or transcriptions generated during development
+# ---------- Ollama / Model Caches ----------
+# Ollama stores models in its own directory, but local test outputs
+# or downloaded weights should not be committed.
+*.gguf
+*.bin
+models/
+
+# ---------- Temporary Media / Uploads (Phase 4) ----------
+# Recordings, videos, or transcriptions generated during development
 *.webm
 *.wav
 *.mp3
 *.ogg
 *.flac
 *.m4a
+*.mp4
+*.mov
+*.avi
 recordings/
 temp_audio/
+
+# ---------- Debug / Scratch ----------
 debug/
+scratch/
 
 # ---------- OS Files ----------
 .DS_Store
