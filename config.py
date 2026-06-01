@@ -28,15 +28,10 @@ if not HF_API_KEY:
 # Model IDs
 # ---------------------------------------------------------------------------
 
-CHAT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-ASR_MODEL_ID  = "openai/whisper-large-v3-turbo"
+CHAT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"    # text reasoning (cloud)
+ASR_MODEL_ID  = "openai/whisper-large-v3-turbo"  # speech recognition (cloud)
 
-# ---------------------------------------------------------------------------
-# Ollama (local VLM — Phase 3)
-# ---------------------------------------------------------------------------
-
-OLLAMA_BASE_URL  = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_VLM_MODEL = os.getenv("OLLAMA_VLM_MODEL", "llava")
+# Vision (LLaVA) is handled locally via Ollama — see services/llava_vision.py
 
 # ---------------------------------------------------------------------------
 # Retry settings (for cold-starting HF models)

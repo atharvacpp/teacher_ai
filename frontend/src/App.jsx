@@ -1,18 +1,21 @@
 /**
  * App.jsx — Root component for the ExplainAI React frontend.
  *
- * Renders the ChatInterface as the sole top-level view.
- * Future phases will add routing for video / audio features here.
+ * Renders the ChatInterface and CodeEditor in a dashboard layout.
  */
 
 import React from "react";
 import ChatInterface from "./components/ChatInterface";
+import CodeEditor from "./components/CodeEditor";
 import "./App.css";
 
 export default function App() {
   return (
     <div className="app">
-      <ChatInterface />
+      <div className="dashboard-layout">
+        <ChatInterface />
+        <CodeEditor />
+      </div>
     </div>
   );
 }

@@ -19,7 +19,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
         Exception: Any error from PyMuPDF during parsing.
     """
     doc = fitz.open(stream=file_bytes, filetype="pdf")
-    extracted = "\n".join(page.get_text() for page in doc)
+    extracted = "\n".join(doc.load_page(i).get_text() for i in range(len(doc)))
 
     if not extracted.strip():
         return "[No readable text found in this PDF]"

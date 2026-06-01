@@ -258,3 +258,49 @@ export async function processYouTubeVideo(url) {
     activeController = null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// POST /execute-code — run Python code in the Docker sandbox
+// ---------------------------------------------------------------------------
+
+/**
+ * Send code to the /execute-code endpoint for sandboxed execution
+ * with self-correcting debugging (up to 3 attempts).
+ *
+ * @param {string} code - Source code to execute.
+ * @param {string} language - "python" | "c" | "cpp"
+ * @returns {Promise<{output: string, has_error: boolean, attempts: number, max_attempts: number, language: string, fixed_code: string|null}>}
+ * @throws {Error} - Re-throws with a user-friendly message on failure.
+ */
+export async function executeCode(code, language = "python") {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/execute-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, language }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(
+        errorData?.detail || `Code execution failed (${response.status})`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(
+        "Code execution timed out. The sandbox may be loading — please try again."
+      );
+    }
+    console.error("[api] executeCode failed:", error);
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}

@@ -1,5 +1,5 @@
 # =============================================================================
-# requirements.txt — ExplainAI Backend (Phase 4)
+# requirements.txt — ExplainAI Backend (Phase 5)
 # =============================================================================
 # Install all dependencies with:  pip install -r requirements.txt
 # =============================================================================
@@ -20,8 +20,8 @@ python-multipart>=0.0.9   # Required by FastAPI for UploadFile / form data
 # --- Configuration & Security ---
 python-dotenv>=1.0.0      # Load environment variables from .env files
 
-# --- Pulled in automatically by FastAPI, pinned here for reproducibility ---
-pydantic>=2.9.0           # Data validation and request/response schemas
+# --- Data Validation (pinned for reproducibility) ---
+pydantic>=2.11.0          # Data validation and request/response schemas
 starlette>=0.40.0         # ASGI toolkit (CORS middleware, routing, etc.)
 
 # --- Text-to-Speech ---
@@ -36,3 +36,8 @@ youtube-transcript-api>=1.0.0  # Fetch YouTube video captions / transcripts
 # --- Local Video Processing (Phase 4) ---
 moviepy>=1.0.3            # Extract audio tracks from video files
 
+# --- LangGraph Orchestrator (Phase 5) ---
+langgraph>=0.2.0          # Stateful multi-agent graph framework
+
+# --- MCP Code Sandbox (Phase 5) ---
+mcp>=1.0.0                # Model Context Protocol SDK (client for Docker sandbox)
