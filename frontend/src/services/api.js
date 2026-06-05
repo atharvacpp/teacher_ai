@@ -71,7 +71,7 @@ export async function sendChatMessage(chatHistory) {
     return data;
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Generation stopped by user.");
+      throw new Error("Generation stopped by user.", { cause: error });
     }
     console.error("[api] sendChatMessage failed:", error);
     throw error;
@@ -137,7 +137,8 @@ export async function transcribeAudio(audioBlob) {
     // Provide a clearer message for abort (timeout) errors
     if (error.name === "AbortError") {
       throw new Error(
-        "Transcription request timed out. The model may be loading — please try again in 30 seconds."
+        "Transcription request timed out. The model may be loading — please try again in 30 seconds.",
+        { cause: error }
       );
     }
 
@@ -146,7 +147,8 @@ export async function transcribeAudio(audioBlob) {
     if (error instanceof TypeError) {
       console.error("[api] transcribeAudio network error:", error);
       throw new Error(
-        "Could not reach the backend server. Please check that uvicorn is running on port 8000."
+        "Could not reach the backend server. Please check that uvicorn is running on port 8000.",
+        { cause: error }
       );
     }
 
@@ -206,7 +208,7 @@ export async function uploadFile(file, prompt = "", forceVision = false) {
     return await response.json();
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Generation stopped by user.");
+      throw new Error("Generation stopped by user.", { cause: error });
     }
     console.error("[api] uploadFile failed:", error);
     throw error;
@@ -250,7 +252,7 @@ export async function processYouTubeVideo(url) {
     return await response.json();
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Generation stopped by user.");
+      throw new Error("Generation stopped by user.", { cause: error });
     }
     console.error("[api] processYouTubeVideo failed:", error);
     throw error;
@@ -269,18 +271,24 @@ export async function processYouTubeVideo(url) {
  *
  * @param {string} code - Source code to execute.
  * @param {string} language - "python" | "c" | "cpp"
- * @returns {Promise<{output: string, has_error: boolean, attempts: number, max_attempts: number, language: string, fixed_code: string|null}>}
+ * @param {string} userInput - Optional stdin data (LeetCode-style pre-typed input)
+ * @returns {Promise<{output: string, has_error: boolean, attempts: number, max_attempts: number, language: string, stderr: string|null, fixed_code: string|null}>}
  * @throws {Error} - Re-throws with a user-friendly message on failure.
  */
-export async function executeCode(code, language = "python") {
+export async function executeCode(code, language = "python", userInput = "") {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
   try {
+    const body = { code, language };
+    if (userInput) {
+      body.user_input = userInput;
+    }
+
     const response = await fetch(`${API_BASE_URL}/execute-code`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, language }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
 
@@ -295,12 +303,121 @@ export async function executeCode(code, language = "python") {
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error(
-        "Code execution timed out. The sandbox may be loading — please try again."
+        "Code execution timed out. The sandbox may be loading — please try again.",
+        { cause: error }
       );
     }
     console.error("[api] executeCode failed:", error);
     throw error;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/orchestrate — Magic Wand SSE Stream
+// ---------------------------------------------------------------------------
+
+/**
+ * Triggers the Magic Wand debugger and streams SSE updates back.
+ */
+export async function orchestrateDebug(payload, onChunk, onDone, onError) {
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/orchestrate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error (${response.status})`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ""; // keep the last incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const data = JSON.parse(line);
+          onChunk(data);
+        } catch (err) {
+          console.error("Failed to parse SSE line:", line, err);
+        }
+      }
+    }
+    
+    // Process remaining buffer
+    if (buffer.trim()) {
+      try {
+        const data = JSON.parse(buffer);
+        onChunk(data);
+      } catch {
+        // ignore
+      }
+    }
+
+    onDone();
+
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    console.error("[api] orchestrateDebug failed:", error);
+    onError(error);
+  } finally {
+    activeController = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/generate-quiz — Quiz Generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a quiz from a video transcript.
+ */
+export async function generateQuiz(videoId, videoTitle, videoTranscript) {
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/generate-quiz`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        video_id: videoId,
+        video_title: videoTitle,
+        video_transcript: videoTranscript,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `Server error (${response.status})`);
+    }
+
+    const data = await response.json();
+    return data.quiz;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Quiz generation stopped.", { cause: error });
+    }
+    console.error("[api] generateQuiz failed:", error);
+    throw error;
+  } finally {
+    activeController = null;
   }
 }

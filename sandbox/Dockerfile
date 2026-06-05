@@ -12,8 +12,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
-# Install only the MCP SDK (kept minimal for fast image builds)
-RUN pip install --no-cache-dir "mcp>=1.0.0"
+# Install FastMCP (includes MCP SDK as a transitive dependency)
+RUN pip install --no-cache-dir "fastmcp>=2.0.0"
 
 # Copy the MCP server script
 COPY server.py /app/server.py

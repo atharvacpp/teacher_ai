@@ -6,7 +6,7 @@
  *   content – The text to display inside the bubble.
  */
 
-import React from "react";
+
 
 export default function MessageBubble({ role, content }) {
   const isUser = role === "user";

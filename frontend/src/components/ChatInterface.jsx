@@ -13,7 +13,7 @@
  * Delegates the actual API calls to services/api.js.
  */
 
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import MessageBubble from "./MessageBubble";
 import {
   sendChatMessage,
@@ -23,7 +23,44 @@ import {
   abortActiveRequest,
 } from "../services/api";
 
-export default function ChatInterface() {
+// ---------------------------------------------------------------------------
+// YouTube Video ID Extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract a YouTube video ID from various URL formats:
+ *   - https://www.youtube.com/watch?v=VIDEO_ID
+ *   - https://youtu.be/VIDEO_ID
+ *   - https://youtube.com/embed/VIDEO_ID
+ *   - https://www.youtube.com/shorts/VIDEO_ID
+ * Returns null if no valid ID is found.
+ */
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const str = url.trim();
+  
+  // If it's exactly 11 characters (raw ID)
+  if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
+    return str;
+  }
+
+  const patterns = [
+    /(?:youtube\.com\/watch\?.*v=)([a-zA-Z0-9_-]{11})/,
+    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+    /(?:m\.youtube\.com\/watch\?.*v=)([a-zA-Z0-9_-]{11})/,
+    /v=([a-zA-Z0-9_-]{11})/, // fallback for any URL containing v=
+  ];
+  
+  for (const pattern of patterns) {
+    const match = str.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }) {
   // -----------------------------------------------------------------------
   // State
   // -----------------------------------------------------------------------
@@ -48,6 +85,8 @@ export default function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+
+
   // -----------------------------------------------------------------------
   // Stop Generation Handler
   // -----------------------------------------------------------------------
@@ -69,6 +108,44 @@ export default function ChatInterface() {
     const trimmed = input.trim();
     // Allow submission if there is a file OR text
     if ((!trimmed && !selectedFile) || loading) return; 
+
+    // Detect YouTube URLs in normal chat messages
+    const videoId = extractYouTubeId(trimmed);
+    if (videoId) {
+      // If it's a YouTube URL, intercept it and process it using the YouTube pipeline
+      if (onVideoDetect) {
+        onVideoDetect({ id: videoId, title: "YouTube Video", transcript: null });
+      }
+      
+      const userMessage = { role: "user", content: `📺 YouTube: ${trimmed}`, videoId };
+      const updatedMessages = [...messages, userMessage];
+      setMessages(updatedMessages);
+      setInput("");
+      setLoading(true);
+
+      try {
+        const response = await processYouTubeVideo(trimmed);
+        const assistantMessage = {
+          role: "assistant",
+          content: response.explanation,
+          audio_base64: response.audio_base64,
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+        
+        if (onVideoDetect) {
+          onVideoDetect({ id: videoId, title: "YouTube Video", transcript: response.transcript });
+        }
+      } catch (error) {
+        if (error.message === "Generation stopped by user.") {
+          setMessages((prev) => [...prev, { role: "assistant", content: "⏹ Generation stopped." }]);
+        } else {
+          setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ Something went wrong: ${error.message}` }]);
+        }
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
 
     // 1. Build the user message visual
     let userContent = trimmed;
@@ -95,6 +172,16 @@ export default function ChatInterface() {
         const response = await uploadFile(fileToUpload, trimmed, forceVision);
         explanation = response.explanation;
         audio_base64 = response.audio_base64;
+
+        // If it's a local video upload, the backend generates a transcript.
+        // We must capture this to enable the "Take Quiz" button!
+        if (fileToUpload.type?.startsWith("video/") && response.transcript && onVideoDetect) {
+          onVideoDetect({ 
+            id: `local-${Date.now()}`, 
+            title: fileToUpload.name, 
+            transcript: response.transcript 
+          });
+        }
       } else {
         // Send the ENTIRE conversation history to the backend
         const response = await sendChatMessage(updatedMessages);
@@ -248,8 +335,14 @@ export default function ChatInterface() {
     const url = youtubeUrl.trim();
     if (!url || loading) return;
 
+    // Extract video ID for iframe embedding
+    const videoId = extractYouTubeId(url);
+    if (videoId && onVideoDetect) {
+      onVideoDetect({ id: videoId, title: "YouTube Video", transcript: null }); // placeholder until fetched
+    }
+
     // Show the user's URL in the chat
-    const userMessage = { role: "user", content: `📺 YouTube: ${url}` };
+    const userMessage = { role: "user", content: `📺 YouTube: ${url}`, videoId };
     setMessages((prev) => [...prev, userMessage]);
     setYoutubeUrl("");
     setShowYouTubeInput(false);
@@ -263,6 +356,11 @@ export default function ChatInterface() {
         audio_base64: response.audio_base64,
       };
       setMessages((prev) => [...prev, assistantMessage]);
+      
+      // Pass the fully loaded transcript up to App.jsx for the Quiz Engine
+      if (videoId && onVideoDetect) {
+        onVideoDetect({ id: videoId, title: "YouTube Video", transcript: response.transcript });
+      }
     } catch (error) {
       if (error.message === "Generation stopped by user.") {
         setMessages((prev) => [...prev, { role: "assistant", content: "⏹ Generation stopped." }]);
@@ -301,17 +399,39 @@ export default function ChatInterface() {
           </div>
         )}
 
-        {messages.map((msg, idx) => (
-          <div key={idx} className="message-container">
-            <MessageBubble 
-              role={msg.role} 
-              content={msg.content} 
-            />
-            {msg.role === "assistant" && msg.audio_base64 && (
-              <audio controls src={`data:audio/mpeg;base64,${msg.audio_base64}`} className="mt-3 w-full" />
-            )}
-          </div>
-        ))}
+        {messages.map((msg, idx) => {
+          const isYouTube = Boolean(msg.videoId);
+          const isThisActiveVideo = activeVideo?.id === msg.videoId;
+          const transcriptLoaded = isThisActiveVideo && Boolean(activeVideo?.transcript);
+
+          return (
+            <div key={idx} className="message-container">
+              <MessageBubble 
+                role={msg.role} 
+                content={msg.content} 
+              />
+              
+              {/* Inline YouTube Player */}
+              {isYouTube && (
+                <div className="inline-video-card" style={{ marginTop: "12px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(139, 92, 246, 0.15)", borderRadius: "12px", overflow: "hidden" }}>
+                  <div className="youtube-embed__wrapper" style={{ height: "260px", position: "relative" }}>
+                    <iframe
+                      src={`https://www.youtube.com/embed/${msg.videoId}`}
+                      title="YouTube video player"
+                      style={{ border: "none", width: "100%", height: "100%", position: "absolute", inset: 0 }}
+                      allow="fullscreen"
+                      allowFullScreen
+                    />
+                  </div>
+                </div>
+              )}
+
+              {msg.role === "assistant" && msg.audio_base64 && (
+                <audio controls src={`data:audio/mpeg;base64,${msg.audio_base64}`} className="mt-3 w-full" />
+              )}
+            </div>
+          );
+        })}
 
         {/* Thinking indicator with Stop button */}
         {loading && (

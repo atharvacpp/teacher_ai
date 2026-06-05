@@ -24,12 +24,19 @@ if not HF_API_KEY:
         "Please add it to your .env file before starting the server."
     )
 
+# E2B Sandbox
+E2B_API_KEY: str | None = os.getenv("E2B_API_KEY")
+if not E2B_API_KEY:
+    print("WARNING: E2B_API_KEY is not set. Cloud Sandbox features will be disabled.")
+
 # ---------------------------------------------------------------------------
 # Model IDs
 # ---------------------------------------------------------------------------
 
 CHAT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"    # text reasoning (cloud)
 ASR_MODEL_ID  = "openai/whisper-large-v3-turbo"  # speech recognition (cloud)
+DEBUGGER_MODEL = "deepseek-coder-v2"          # autonomous debugging (local)
+OLLAMA_BASE_URL = "http://localhost:11434"    # local ollama instance
 
 # Vision (LLaVA) is handled locally via Ollama — see services/llava_vision.py
 

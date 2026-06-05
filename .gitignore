@@ -1,18 +1,13 @@
 # =============================================================================
-# .gitignore — ExplainAI Full-Stack Project (Phase 5)
-# =============================================================================
-# REMINDER: Keep this file updated as new features, tools, or dependencies
-# are added to the project. Each new phase may introduce files that should
-# not be committed (temp data, model caches, build artefacts, etc.).
+# .gitignore — Multimodal AI Explainer Platform
 # =============================================================================
 
 # ---------- Environment & Secrets ----------
-# NEVER commit API keys or secrets to version control
 .env
 .env.*
 !.env.example
 
-# ---------- Python ----------
+# ---------- Python Backend ----------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -22,39 +17,30 @@ dist/
 build/
 .eggs/
 *.egg
-
-# Virtual environments
 .venv/
 venv/
 ENV/
-
-# Type checking / linting caches
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
 
-# ---------- Node / Frontend ----------
+# ---------- Node Frontend ----------
 node_modules/
 frontend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-
-# Build output
 frontend/dist/
 frontend/dist-ssr/
 *.local
 
 # ---------- Ollama / Model Caches ----------
-# Ollama stores models in its own directory, but local test outputs
-# or downloaded weights should not be committed.
 *.gguf
 *.bin
 models/
 
 # ---------- Temporary Media / Uploads ----------
-# Recordings, videos, or transcriptions generated during development
 *.webm
 *.wav
 *.mp3
@@ -67,23 +53,21 @@ models/
 recordings/
 temp_audio/
 
-# ---------- Docker (Phase 5) ----------
-# Never commit sandbox temp files or Docker build caches
+# ---------- Local Debug & Logs ----------
 sandbox/__pycache__/
 sandbox/smoke_test.py
-
-# ---------- Debug / Scratch / Test artifacts ----------
 debug/
 scratch/
 _test_*.py
 test.pdf
+*.log
+*.bak
+*.tmp
 
-# ---------- OS Files ----------
+# ---------- OS & IDE Files ----------
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# ---------- IDE / Editor ----------
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -93,11 +77,4 @@ Desktop.ini
 *.njsproj
 *.sln
 *.sw?
-
-# ---------- Gemini / AI Agents ----------
 .gemini/
-
-# ---------- Miscellaneous ----------
-*.log
-*.bak
-*.tmp

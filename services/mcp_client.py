@@ -12,8 +12,12 @@ Supported languages: python, c, cpp.
 Usage:
     from services.mcp_client import run_code
 
-    output, has_error = await run_code("print(1 + 1)", language="python")
-    output, has_error = await run_code('#include <stdio.h>\\nint main(){printf("hi");return 0;}', language="c")
+    output, has_error, stderr = await run_code("print(1 + 1)", language="python")
+    output, has_error, stderr = await run_code(
+        'name = input()\\nprint(f"Hello {name}")',
+        language="python",
+        user_input="World",
+    )
 """
 
 import json
@@ -68,7 +72,11 @@ if _MCP_AVAILABLE:
 VALID_LANGUAGES = {"python", "c", "cpp"}
 
 
-async def run_code(code: str, language: str = "python") -> tuple[str, bool]:
+async def run_code(
+    code: str,
+    language: str = "python",
+    user_input: str = "",
+) -> tuple[str, bool, str | None]:
     """
     Execute code inside the Docker sandbox via MCP.
 
@@ -76,14 +84,16 @@ async def run_code(code: str, language: str = "python") -> tuple[str, bool]:
     ``execute_code`` MCP tool, and tears down the container.
 
     Args:
-        code:     Source code to execute.
-        language: One of "python", "c", or "cpp".
+        code:       Source code to execute.
+        language:   One of "python", "c", or "cpp".
+        user_input: Optional stdin data fed to the subprocess (for input()/scanf/cin).
 
     Returns:
-        A tuple of (output_text, has_error).
+        A tuple of (output_text, has_error, stderr_text).
         ``output_text`` contains stdout and, if an error occurred,
         the full traceback / compile error appended after a blank line.
         ``has_error`` is True when the code failed to compile or run.
+        ``stderr_text`` is the raw stderr output (None if no stderr).
 
     Raises:
         RuntimeError: If the ``mcp`` SDK is not installed.
@@ -101,13 +111,18 @@ async def run_code(code: str, language: str = "python") -> tuple[str, bool]:
             f"Unsupported language: '{language}'. Must be one of: {VALID_LANGUAGES}"
         )
 
+    # Build the arguments dict — include user_input only if provided
+    tool_args = {"code": code, "language": language}
+    if user_input:
+        tool_args["user_input"] = user_input
+
     async with stdio_client(_SANDBOX_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
             result = await session.call_tool(
                 "execute_code",
-                arguments={"code": code, "language": language},
+                arguments=tool_args,
             )
 
             # ── Parse the JSON payload from the sandbox server ──
@@ -120,16 +135,18 @@ async def run_code(code: str, language: str = "python") -> tuple[str, bool]:
                 data = json.loads(raw_text)
             except json.JSONDecodeError:
                 # Fallback: treat the raw text as output
-                return (raw_text or "(no output)"), True
+                return (raw_text or "(no output)"), True, None
 
             stdout = data.get("stdout", "")
+            stderr = data.get("stderr", "")
             error = data.get("error")
             compile_error = data.get("compile_error")
 
             # Determine if there was any error
             has_error = (error is not None) or (compile_error is not None)
 
-            # Combine stdout + compile_error + runtime error
+            # Combine stdout + compile_error + runtime error for the
+            # backwards-compatible output string
             output = ""
             if compile_error:
                 output += f"[Compilation Error]\n{compile_error}\n"
@@ -140,4 +157,7 @@ async def run_code(code: str, language: str = "python") -> tuple[str, bool]:
                     output += "\n"
                 output += error
 
-            return (output.strip() if output else "(no output)"), has_error
+            # Return stderr separately so the frontend can render it
+            stderr_out = stderr.strip() if stderr else None
+
+            return (output.strip() if output else "(no output)"), has_error, stderr_out

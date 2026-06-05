@@ -1,43 +1,44 @@
-# =============================================================================
-# requirements.txt — ExplainAI Backend (Phase 5)
-# =============================================================================
-# Install all dependencies with:  pip install -r requirements.txt
-# =============================================================================
+# ==========================================
+# Core AI & Orchestration
+# ==========================================
+langchain==0.1.0
+langchain-core==0.1.10
+langchain-ollama==0.0.1
+langgraph==0.0.21
+mcp==1.27.2
 
-# --- Web Framework & Server ---
-fastapi>=0.115.0          # Modern async web framework for building APIs
-uvicorn>=0.30.0           # Lightning-fast ASGI server to run FastAPI
+# ==========================================
+# Web Framework & Server
+# ==========================================
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-multipart==0.0.6
 
-# --- AI / Model Integration ---
-huggingface_hub>=0.25.0   # Official Hugging Face client (InferenceClient)
+# ==========================================
+# Code Execution Sandbox
+# ==========================================
+e2b-code-interpreter==0.0.9
 
-# --- HTTP Client ---
-requests>=2.31.0          # Used for Ollama local API calls (streaming)
+# ==========================================
+# Multimodal & Vision
+# ==========================================
+PyMuPDF==1.23.17  # fitz
 
-# --- File Upload Support ---
-python-multipart>=0.0.9   # Required by FastAPI for UploadFile / form data
+# ==========================================
+# Media Processing & Extraction
+# ==========================================
+moviepy==1.0.3
+youtube-transcript-api==0.6.2
+gTTS==2.5.1
 
-# --- Configuration & Security ---
-python-dotenv>=1.0.0      # Load environment variables from .env files
+# ==========================================
+# HTTP & Networking
+# ==========================================
+httpx==0.26.0
 
-# --- Data Validation (pinned for reproducibility) ---
-pydantic>=2.11.0          # Data validation and request/response schemas
-starlette>=0.40.0         # ASGI toolkit (CORS middleware, routing, etc.)
-
-# --- Text-to-Speech ---
-gTTS>=2.5.0               # Google TTS audio generation
-
-# --- PDF Parsing (Phase 3) ---
-PyMuPDF>=1.24.0           # Fast, in-memory PDF text extraction via fitz
-
-# --- YouTube Transcript (Phase 4) ---
-youtube-transcript-api>=1.0.0  # Fetch YouTube video captions / transcripts
-
-# --- Local Video Processing (Phase 4) ---
-moviepy>=1.0.3            # Extract audio tracks from video files
-
-# --- LangGraph Orchestrator (Phase 5) ---
-langgraph>=0.2.0          # Stateful multi-agent graph framework
-
-# --- MCP Code Sandbox (Phase 5) ---
-mcp>=1.0.0                # Model Context Protocol SDK (client for Docker sandbox)
+# ==========================================
+# Utilities
+# ==========================================
+python-dotenv==1.0.1

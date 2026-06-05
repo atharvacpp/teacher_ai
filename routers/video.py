@@ -24,15 +24,11 @@ router = APIRouter(tags=["Video"])
 # Request / Response Schemas
 # ---------------------------------------------------------------------------
 
+from schemas import YouTubeResponse
+
 class YouTubeRequest(BaseModel):
     """Payload for the /youtube endpoint."""
     url: str
-
-
-class YouTubeResponse(BaseModel):
-    """Response from the /youtube endpoint."""
-    explanation: str
-    audio_base64: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +158,7 @@ async def process_youtube_video(body: YouTubeRequest):
 
     return YouTubeResponse(
         explanation=explanation,
+        transcript=full_transcript,
         audio_base64=audio_base64,
     )
 
@@ -293,5 +290,6 @@ async def upload_local_video(file: UploadFile = File(...)):
 
     return YouTubeResponse(
         explanation=explanation,
+        transcript=transcript_text,
         audio_base64=audio_base64,
     )

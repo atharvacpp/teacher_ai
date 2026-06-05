@@ -10,7 +10,11 @@ This file contains only:
 All business logic lives in routers/ and services/.
 """
 
+import sys
 import asyncio
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import io
 import time
 import wave
@@ -22,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import InferenceClient
 
 from config import HF_API_KEY, ASR_MODEL_ID
-from routers import chat, execute, upload, video, voice
+from routers import chat, execute, upload, video, voice, ws_execute, orchestrate, quiz
 
 # ---------------------------------------------------------------------------
 # Background Tasks & Lifespan
@@ -141,3 +145,6 @@ app.include_router(execute.router)
 app.include_router(upload.router)
 app.include_router(video.router)
 app.include_router(voice.router)
+app.include_router(ws_execute.router)
+app.include_router(orchestrate.router)
+app.include_router(quiz.router)

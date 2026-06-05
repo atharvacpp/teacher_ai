@@ -25,6 +25,7 @@ router = APIRouter(tags=["Code Execution"])
 class ExecuteCodeRequest(BaseModel):
     code: str
     language: str = "python"  # "python" | "c" | "cpp"
+    user_input: str = ""      # Optional stdin data (LeetCode-style)
 
 
 class ExecuteCodeResponse(BaseModel):
@@ -33,6 +34,7 @@ class ExecuteCodeResponse(BaseModel):
     attempts: int
     max_attempts: int
     language: str
+    stderr: str | None = None
     fixed_code: str | None = None
 
 
@@ -53,6 +55,7 @@ async def execute_code(payload: ExecuteCodeRequest):
     """
     code = payload.code.strip()
     language = payload.language.lower()
+    user_input = payload.user_input
     if not code:
         raise HTTPException(status_code=400, detail="No code provided.")
 
@@ -65,6 +68,8 @@ async def execute_code(payload: ExecuteCodeRequest):
 
     print("=" * 60)
     print(f"[Execute] Received {len(code)} chars of {language} code")
+    if user_input:
+        print(f"[Execute] With {len(user_input)} chars of stdin input")
     print("=" * 60)
 
     # Build a minimal state — we skip teacher + code_extractor and jump
@@ -79,6 +84,7 @@ async def execute_code(payload: ExecuteCodeRequest):
     original_code = code
     current_code = code
     execution_output = ""
+    stderr_output = None
     has_error = False
     attempts = 0
 
@@ -87,7 +93,9 @@ async def execute_code(payload: ExecuteCodeRequest):
         print(f"[Execute] Attempt {attempt}/{MAX_DEBUG_ATTEMPTS}...")
 
         try:
-            execution_output, has_error = await run_code(current_code, language=language)
+            execution_output, has_error, stderr_output = await run_code(
+                current_code, language=language, user_input=user_input,
+            )
         except Exception as exc:
             execution_output = f"⚠️ Sandbox unavailable: {exc}"
             has_error = False  # Don't trigger debugger for infra errors
@@ -132,5 +140,6 @@ async def execute_code(payload: ExecuteCodeRequest):
         attempts=attempts,
         max_attempts=MAX_DEBUG_ATTEMPTS,
         language=language,
+        stderr=stderr_output,
         fixed_code=fixed_code,
     )
