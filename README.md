@@ -1,105 +1,101 @@
-<div align="center">
-  <h1>🚀 Multimodal AI Explainer Platform</h1>
-  <p><strong>Enterprise-grade AI tutoring and interactive learning platform built with LangGraph, Qwen2.5-VL, and E2B Code Interpreter.</strong></p>
-  <br />
-</div>
+# 🎓 Teacher AI: The Multimodal AI Explainer Platform
 
-## 📖 Overview
+> **Your personal, highly-energetic, open-source AI tutor.** 
 
-The **Multimodal AI Explainer Platform** is a cutting-edge educational assistant that bridges the gap between passive consumption and active learning. It acts as an interactive AI tutor capable of processing YouTube videos, local documents (PDFs), and direct audio/visual input to synthesize, explain, and evaluate technical concepts in real time. 
-
-By leveraging **LangGraph** for multi-agent orchestration and an **E2B Docker Sandbox** for secure code execution, users can chat, write code, and seamlessly debug logic alongside an autonomous AI.
+Teacher AI is a state-of-the-art multimodal learning platform designed to break down complex topics into incredibly fun, engaging, and easy-to-understand explanations. By combining local autonomous agents with cloud-based vision and speech models, it allows you to learn from nearly any format—text, audio, video, or handwritten notes—and even write and debug code in an isolated sandbox!
 
 ---
 
-## ✨ Features
+## 🚀 Key Features
 
-- 🧠 **LangGraph Multi-Agent Orchestration:** Complex workflows are managed dynamically by stateful, multi-step agent interactions, ensuring the AI correctly scopes, plans, and executes tutoring workflows.
-- 🛠️ **E2B Autonomous Debugging Sandbox:** Safely execute Python, C, and C++ code directly in the browser via an isolated E2B cloud container. The AI can autonomously intercept stack traces and automatically suggest fixes using the "Magic Wand" debugger.
-- 👁️ **Zero-Latency Local Multimodal Vision:** Powered by **Qwen-VL** and **PyMuPDF**, the platform analyzes complex visual content and documents (hybrid PDFs, handwritten diagrams) in real time with minimal latency.
-- 🎓 **Pydantic-Enforced AI Quiz Generation:** Features a distraction-free "Focus Mode" that generates dynamic, context-aware interactive quizzes using Hugging Face Inference endpoints and strict Pydantic JSON schemas.
-- 🎙️ **Audio Processing:** Effortless extraction and processing of local video and audio using **MoviePy** and **Whisper**.
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-- **React.js** with Vite for lightning-fast HMR
-- **react-resizable-panels** for a professional IDE-like layout
-- **Monaco Editor** & **XTerm.js** for an authentic coding and terminal experience
-- **Vanilla CSS** with glassmorphism, dynamic animations, and rich aesthetics
-
-### Backend
-- **FastAPI** & **Uvicorn** for high-performance Python asynchronous routing
-- **Pydantic** for rigid data validation and AI output enforcement
-- **WebSockets** for real-time sandbox terminal streaming
-
-### AI & Infrastructure
-- **LangGraph** for deterministic agent graphs
-- **E2B Code Interpreter** for secure, isolated code execution
-- **Local Ollama** (Qwen2.5 / Qwen2.5-VL) for private, offline intelligence
-- **Hugging Face API** for fast serverless generation
-- **MoviePy & PyMuPDF** for media ingestion and document extraction
+*   **📺 YouTube Video Extraction:** Paste any YouTube URL to instantly extract transcripts and generate engaging, comprehensive summaries of the video's core concepts.
+*   **🎤 Audio Processing (Whisper):** Upload MP4s or other audio/video formats to extract speech, transcribed flawlessly via `openai/whisper-large-v3-turbo`.
+*   **👁️ Multimodal Vision Processing:** Upload PDFs or images (including handwritten notes!). Processed locally via Ollama (`llava`) and PyMuPDF to extract and explain visual information.
+*   **🗣️ Text-to-Speech (TTS):** Explanations are automatically converted into lifelike audio playback, so you can listen while you learn.
+*   **📝 Context-Aware Quizzes:** The AI generates dynamic, JSON-structured quizzes based on the extracted transcripts or documents to test your knowledge in a distraction-free Focus Mode.
+*   **💻 Local Code Execution Sandbox:** A secure Docker-powered environment to write, run, and test Python, C, and C++ code directly within the chat interface.
+*   **🤖 DeepSeek Autonomous Debugger:** Click the "Magic Wand" in the code editor to trigger a local `deepseek-coder-v2` agent that autonomously finds bugs and fixes your code on the fly!
 
 ---
 
-## 🚀 How to Run Locally
+## 🧠 Architecture Overview
 
-### Prerequisites
-- [Node.js](https://nodejs.org/en/) (v18+)
-- [Python](https://www.python.org/) (3.10+)
-- [Ollama](https://ollama.ai/) installed locally and running `qwen2.5` / `qwen2.5-vl`
-- E2B API Key (for the code execution sandbox)
-- Hugging Face API Key (for quiz generation)
+Teacher AI is powered by a robust backend built with **FastAPI** and **LangGraph**, communicating with a sleek **React (Vite)** frontend. 
 
-### 1. Backend Setup
+The core of the logic revolves around a **LangGraph Multi-Agent state machine**:
+1.  **Summarizer Node:** Ingests raw text, transcripts, or vision-extracted OCR data and compresses it into core concepts.
+2.  **Teacher Node:** Takes the concepts and expands them into highly engaging, analogy-driven explanations.
+3.  **Reviewer Node:** Acts as a quality-control check to ensure the explanation is accurate, properly formatted, and easy to understand.
 
-Open a terminal and navigate to the project root:
+For the coding environment, we utilize a local **FastMCP Server** connected to a Docker container. When the user hits the "Debug with AI" button, the **DeepSeek Autonomous Debugger** analyzes the code and terminal output to intelligently rewrite the active file.
 
+---
+
+## 🛠️ Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+*   **Node.js** (v18+ recommended) for the React frontend.
+*   **Python 3.10+** for the FastAPI backend.
+*   **Docker** for running the isolated code execution sandbox.
+*   **[Ollama](https://ollama.com/)** for running local vision and debugging models.
+
+---
+
+## ⚡ Step-by-Step Quickstart Guide
+
+### 1. Clone the Repository
 ```bash
-# 1. Create and activate a virtual environment
+git clone https://github.com/yourusername/teacher-ai.git
+cd teacher-ai
+```
+
+### 2. Set Up the Backend
+Install the Python dependencies:
+```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 
-# 2. Install dependencies
+# Windows
+.venv\Scripts\activate
+# Mac/Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
+```
 
-# 3. Configure your environment variables
+### 3. Configure Environment Variables
+Copy the template environment file:
+```bash
 cp .env.example .env
-# Edit .env and add your E2B_API_KEY and HF_API_KEY
+```
+Open `.env` and add your **HuggingFace API Key** (required for the cloud-based Qwen chat and Whisper ASR models).
 
-# 4. Start the FastAPI server
+### 4. Pull Local Models via Ollama
+Ensure Docker or Ollama is running, then pull the required models:
+```bash
+ollama run llava               # For Vision / PDF OCR
+ollama run deepseek-coder-v2   # For Autonomous Code Debugging
+```
+
+### 5. Build the Code Execution Sandbox
+Build the Docker image used for running user code safely:
+```bash
+cd sandbox
+docker build -t aethernet-sandbox .
+cd ..
+```
+
+### 6. Start the Services
+Start the **FastAPI Backend** (from the root directory):
+```bash
 uvicorn main:app --reload
 ```
-*The backend will be running on `http://localhost:8000`.*
 
-### 2. Frontend Setup
-
-Open a new terminal window and navigate to the `frontend` folder:
-
+In a new terminal window, start the **React Frontend**:
 ```bash
-# 1. Navigate to the frontend directory
 cd frontend
-
-# 2. Install Node dependencies
 npm install
-
-# 3. Start the Vite dev server
 npm run dev
 ```
-*The React app will be running on `http://localhost:5173` (or the port specified by Vite).*
 
----
-
-## 📁 Repository Structure Blueprint
-*(See documentation for full architecture breakdown)*
-
-- `backend/` - FastAPI routes, LangGraph services, and core orchestration
-- `frontend/` - React application, UI components, and API integration
-- `sandbox/` - E2B Docker configurations and execution logic
-
----
-<div align="center">
-  <i>Built with ❤️ for modern engineering teams and educators.</i>
-</div>
+Open your browser to `http://localhost:5173` and start learning! 🎓

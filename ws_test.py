@@ -3,7 +3,7 @@ import websockets
 import json
 
 async def test():
-    async with websockets.connect('ws://localhost:8000/ws/execute') as ws:
+    async with websockets.connect('ws://127.0.0.1:8000/ws/execute') as ws:
         code = """
 #include <stdio.h>
 int main() {

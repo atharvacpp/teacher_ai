@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import InferenceClient
 
 from config import HF_API_KEY, ASR_MODEL_ID
-from routers import chat, execute, upload, video, voice, ws_execute, orchestrate, quiz
+from routers import chat, pipeline_b_execution, pipeline_a_reasoning, video, voice, ws_execute, quiz
 
 # ---------------------------------------------------------------------------
 # Background Tasks & Lifespan
@@ -141,10 +141,9 @@ def ping():
 # ---------------------------------------------------------------------------
 
 app.include_router(chat.router)
-app.include_router(execute.router)
-app.include_router(upload.router)
+app.include_router(pipeline_b_execution.router)
+app.include_router(pipeline_a_reasoning.router)
 app.include_router(video.router)
 app.include_router(voice.router)
 app.include_router(ws_execute.router)
-app.include_router(orchestrate.router)
 app.include_router(quiz.router)

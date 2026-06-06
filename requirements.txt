@@ -19,7 +19,7 @@ python-multipart==0.0.6
 # ==========================================
 # Code Execution Sandbox
 # ==========================================
-e2b-code-interpreter==0.0.9
+# (Using FastMCP with local Docker, no external dependencies)
 
 # ==========================================
 # Multimodal & Vision
@@ -42,3 +42,4 @@ httpx==0.26.0
 # Utilities
 # ==========================================
 python-dotenv==1.0.1
+huggingface-hub

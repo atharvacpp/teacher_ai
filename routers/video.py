@@ -12,6 +12,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services.hf_chat import generate_chat_response
@@ -134,7 +135,7 @@ async def process_youtube_video(body: YouTubeRequest):
     print(f"Preview: {full_transcript[:300]}")
     print("=========================================")
 
-    # 4. Send the transcript to Qwen2.5 for summarisation
+    # 4. Stream the response to the frontend
     prompt = (
         "Summarize and explain the core concepts of this video transcript. "
         "Organise your response with clear headings, bullet points where "
@@ -142,25 +143,46 @@ async def process_youtube_video(body: YouTubeRequest):
         f"{full_transcript}"
     )
 
-    try:
-        explanation = generate_chat_response(
-            [{"role": "user", "content": prompt}],
-            max_tokens=1024,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"LLM explanation error (Qwen): {exc}",
-        ) from exc
+    async def event_stream():
+        import json
+        from fastapi import Request
+        # Note: We don't have Request in the signature, but we can just stream without disconnect check
+        # Or let's just yield the chunks.
+        
+        # First, yield the transcript so the frontend can store it
+        yield f"data: {json.dumps({'type': 'transcript', 'content': full_transcript})}\n\n"
+        yield f"data: {json.dumps({'type': 'log', 'message': 'Thinking...'})}\n\n"
 
-    # 5. Generate TTS audio
-    audio_base64 = generate_tts_audio(explanation)
+        full_text = ""
+        has_error = False
+        try:
+            from services.hf_chat import stream_chat_response
+            for chunk in stream_chat_response([{"role": "user", "content": prompt}], max_tokens=1024):
+                full_text += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        except Exception as exc:
+            has_error = True
+            yield f"data: {json.dumps({'type': 'error', 'content': f'LLM explanation error: {exc}'})}\n\n"
 
-    return YouTubeResponse(
-        explanation=explanation,
-        transcript=full_transcript,
-        audio_base64=audio_base64,
-    )
+        # ALWAYS send 'text_complete' so the frontend hides "Thinking..." even after errors
+        yield f"data: {json.dumps({'type': 'text_complete'})}\n\n"
+
+        if has_error:
+            return
+
+        # TTS runs after — audio arrives as a late follow-up
+        if full_text.strip():
+            audio_base64 = None
+            try:
+                import asyncio
+                audio_base64 = await asyncio.to_thread(generate_tts_audio, full_text)
+            except Exception as e:
+                print(f"TTS error: {e}")
+
+            if audio_base64:
+                yield f"data: {json.dumps({'type': 'audio', 'audio_base64': audio_base64})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------
@@ -268,28 +290,47 @@ async def upload_local_video(file: UploadFile = File(...)):
         except Exception as e:
             print(f"[video] Warning: could not clean up temp files: {e}")
 
-    # 5. Send transcript to Qwen2.5 for summarisation
-    prompt = (
-        "Summarize and explain the core concepts of this uploaded video transcript: \n\n"
-        f"{transcript_text}"
-    )
-
-    try:
-        explanation = generate_chat_response(
-            [{"role": "user", "content": prompt}],
-            max_tokens=1024,
+        # 3. Stream the response to the frontend
+        prompt = (
+            "Summarize and explain the core concepts of this video transcript. "
+            "Organise your response with clear headings, bullet points where "
+            "appropriate, and provide any relevant context or insights:\n\n"
+            f"{transcript_text}"
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"LLM explanation error (Qwen): {exc}",
-        ) from exc
 
-    # 6. Generate TTS audio
-    audio_base64 = generate_tts_audio(explanation)
+        async def event_stream():
+            import json
+            yield f"data: {json.dumps({'type': 'transcript', 'content': transcript_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'message': 'Thinking...'})}\n\n"
 
-    return YouTubeResponse(
-        explanation=explanation,
-        transcript=transcript_text,
-        audio_base64=audio_base64,
-    )
+            full_text = ""
+            has_error = False
+            try:
+                from services.hf_chat import stream_chat_response
+                for chunk in stream_chat_response([{"role": "user", "content": prompt}], max_tokens=1024):
+                    full_text += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            except Exception as exc:
+                has_error = True
+                yield f"data: {json.dumps({'type': 'error', 'content': f'LLM explanation error: {exc}'})}\n\n"
+
+            # ALWAYS send 'text_complete' so the frontend hides "Thinking..." even after errors
+            yield f"data: {json.dumps({'type': 'text_complete'})}\n\n"
+
+            if has_error:
+                return
+
+            # TTS runs after — audio arrives as a late follow-up
+            if full_text.strip():
+                audio_base64 = None
+                try:
+                    import asyncio
+                    from services.tts import generate_tts_audio
+                    audio_base64 = await asyncio.to_thread(generate_tts_audio, full_text)
+                except Exception as e:
+                    print(f"TTS error: {e}")
+
+                if audio_base64:
+                    yield f"data: {json.dumps({'type': 'audio', 'audio_base64': audio_base64})}\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")

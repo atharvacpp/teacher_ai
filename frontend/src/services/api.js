@@ -80,6 +80,151 @@ export async function sendChatMessage(chatHistory) {
   }
 }
 
+/**
+ * Common utility to read Server-Sent Events (SSE) from a fetch Response.
+ *
+ * @param {Response} response
+ * @param {Object} callbacks
+ * @param {Function} [callbacks.onChunk]
+ * @param {Function} [callbacks.onAudio]
+ * @param {Function} [callbacks.onTextComplete] - Fired when text is fully streamed; UI can unlock here
+ * @param {Function} [callbacks.onTranscript]
+ * @param {Function} [callbacks.onDone] - Fired once when the SSE connection closes
+ * @param {Function} [callbacks.onStatus]
+ */
+async function readStream(response, {
+  onChunk,
+  onAudio,
+  onTextComplete,
+  onTranscript,
+  onDone,
+  onStatus,
+}) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let doneCallbackFired = false;
+  let textCompleteFired = false;
+  let streamError = null;
+
+  const fireTextComplete = () => {
+    if (!textCompleteFired) {
+      textCompleteFired = true;
+      if (onTextComplete) onTextComplete();
+    }
+  };
+
+  const fireDone = () => {
+    if (!doneCallbackFired) {
+      doneCallbackFired = true;
+      if (onDone) onDone();
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        let jsonStr = line;
+        if (line.startsWith("data:")) {
+          jsonStr = line.substring(5).trim();
+        }
+
+        if (!jsonStr) continue;
+
+        try {
+          const data = JSON.parse(jsonStr);
+          if (data.type === "chunk") {
+            if (onChunk) onChunk(data.content);
+          } else if (data.type === "log" || data.type === "status") {
+            if (onStatus) {
+              onStatus(data.message || data.content);
+            } else if (onChunk) {
+              onChunk(`\n> _${data.message || data.content}_\n\n`);
+            }
+          } else if (data.type === "transcript") {
+            if (onTranscript) onTranscript(data.content);
+          } else if (data.type === "text_complete") {
+            fireTextComplete();
+          } else if (data.type === "audio") {
+            const audioPayload = data.data || data.audio_base64;
+            if (onAudio && audioPayload) onAudio(audioPayload);
+          } else if (data.type === "error") {
+            streamError = new Error(data.content || data.message);
+          } else if (data.type === "done") {
+            fireTextComplete();
+          }
+        } catch (err) {
+          if (onChunk && !jsonStr.startsWith("{")) {
+            onChunk(jsonStr);
+          } else {
+            console.error("[api] Failed to parse stream chunk:", jsonStr);
+          }
+        }
+      }
+    }
+  } finally {
+    fireDone();
+    reader.releaseLock();
+  }
+
+  if (streamError) {
+    throw streamError;
+  }
+}
+
+/**
+ * Stream the conversation history to the /chat endpoint via SSE.
+ *
+ * @param {Array<{role: string, content: string}>} chatHistory
+ * @param {Object|Function} callbacks - Callback map or legacy onChunk function
+ * @param {Function} [callbacks.onChunk]
+ * @param {Function} [callbacks.onTextComplete] - Unlock UI when text finishes
+ * @param {Function} [callbacks.onAudio] - Late audio payload for a specific message
+ * @param {Function} [callbacks.onDone] - Stream fully closed (after audio or error)
+ */
+export async function streamChatMessage(chatHistory, callbacks, onAudio, onDone) {
+  const handlers = typeof callbacks === "function"
+    ? { onChunk: callbacks, onAudio, onDone }
+    : callbacks;
+
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `Server error (${response.status})`);
+    }
+
+    await readStream(response, handlers);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Generation stopped by user.", { cause: error });
+    }
+    console.error("[api] streamChatMessage failed:", error);
+    throw error;
+  } finally {
+    activeController = null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /transcribe — upload audio, get transcription text
 // ---------------------------------------------------------------------------
@@ -175,8 +320,7 @@ export async function transcribeAudio(audioBlob) {
  *   extraction.  Useful for hybrid PDFs containing handwriting.
  * @returns {Promise<{explanation: string, audio_base64: string}>} - The AI's response.
  */
-export async function uploadFile(file, prompt = "", forceVision = false) {
-  // Create a fresh controller for this request
+export async function uploadFile(file, prompt = "", forceVision = false, onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete) {
   activeController = new AbortController();
   const { signal } = activeController;
 
@@ -186,10 +330,8 @@ export async function uploadFile(file, prompt = "", forceVision = false) {
     if (prompt && prompt.trim() !== "") {
       formData.append("prompt", prompt.trim());
     }
-    // Tell the backend whether to route through the vision pipeline
     formData.append("force_vision", forceVision ? "true" : "false");
 
-    // Determine the API endpoint based on file type (Phase 4 Local Video support)
     const endpoint = file.type.startsWith("video/") ? "/video/upload" : "/upload";
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -200,12 +342,10 @@ export async function uploadFile(file, prompt = "", forceVision = false) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      throw new Error(
-        errorData?.detail || `Upload failed (${response.status})`
-      );
+      throw new Error(errorData?.detail || `Upload failed (${response.status})`);
     }
 
-    return await response.json();
+    await readStream(response, { onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete });
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Generation stopped by user.", { cause: error });
@@ -229,8 +369,7 @@ export async function uploadFile(file, prompt = "", forceVision = false) {
  * @returns {Promise<{explanation: string, audio_base64: string|null}>}
  * @throws {Error} - Re-throws with a user-friendly message on failure.
  */
-export async function processYouTubeVideo(url) {
-  // Create a fresh controller for this request
+export async function processYouTubeVideo(url, onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete) {
   activeController = new AbortController();
   const { signal } = activeController;
 
@@ -244,12 +383,10 @@ export async function processYouTubeVideo(url) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      throw new Error(
-        errorData?.detail || `YouTube processing failed (${response.status})`
-      );
+      throw new Error(errorData?.detail || `YouTube fetch failed (${response.status})`);
     }
 
-    return await response.json();
+    await readStream(response, { onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete });
   } catch (error) {
     if (error.name === "AbortError") {
       throw new Error("Generation stopped by user.", { cause: error });
@@ -341,36 +478,49 @@ export async function orchestrateDebug(payload, onChunk, onDone, onError) {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ""; // keep the last incomplete line in buffer
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ""; // keep the last incomplete line in buffer
 
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const data = JSON.parse(line);
-          onChunk(data);
-        } catch (err) {
-          console.error("Failed to parse SSE line:", line, err);
+        for (let line of lines) {
+          line = line.trim();
+          if (!line) continue;
+          
+          let jsonStr = line;
+          if (line.startsWith("data:")) {
+            jsonStr = line.substring(5).trim();
+          }
+          
+          try {
+            const data = JSON.parse(jsonStr);
+            onChunk(data);
+            if (data.type === "success" || data.type === "error") {
+              return; // Fix: exit stream loop on terminal states
+            }
+          } catch (err) {
+            console.error("Failed to parse SSE line:", jsonStr, err);
+          }
         }
       }
-    }
-    
-    // Process remaining buffer
-    if (buffer.trim()) {
-      try {
-        const data = JSON.parse(buffer);
-        onChunk(data);
-      } catch {
-        // ignore
+      
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          onChunk(data);
+        } catch {
+          // ignore
+        }
       }
+    } finally {
+      onDone();
+      reader.releaseLock();
     }
-
-    onDone();
 
   } catch (error) {
     if (error.name === "AbortError") return;

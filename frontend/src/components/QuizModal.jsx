@@ -23,6 +23,7 @@ export default function QuizModal({ videoId, videoTitle, videoTranscript, onClos
   const [error, setError]           = useState(null);
   const [answers, setAnswers]       = useState({});   // { questionIndex: selectedOptionText }
   const [score, setScore]           = useState(0);
+  const [retryTrigger, setRetryTrigger] = useState(0);
   const topRef                      = useRef(null);
 
   // ─── Fetch quiz on mount ────────────────────────────────────────────────
@@ -46,7 +47,7 @@ export default function QuizModal({ videoId, videoTitle, videoTranscript, onClos
 
     fetchQuiz();
     return () => { cancelled = true; };
-  }, [videoId, videoTitle, videoTranscript]);
+  }, [videoId, videoTitle, videoTranscript, retryTrigger]);
 
   // ─── Handlers ───────────────────────────────────────────────────────────
 
@@ -70,7 +71,9 @@ export default function QuizModal({ videoId, videoTitle, videoTranscript, onClos
   function handleRetry() {
     setAnswers({});
     setScore(0);
-    setStage(STAGE_QUIZ);
+    setQuiz(null);
+    setStage(STAGE_LOADING);
+    setRetryTrigger(prev => prev + 1);
     topRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 

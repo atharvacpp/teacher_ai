@@ -30,7 +30,7 @@ router = APIRouter(tags=["Quiz"])
 def _extract_json(text: str) -> dict:
     """
     Try to extract a JSON object from model output.
-    Handles markdown fenced blocks and raw JSON.
+    Handles markdown fenced blocks, raw JSON, and truncated JSON.
     """
     # Try fenced ```json ... ``` block first
     match = re.search(r"```json\s*\n(.*?)\n\s*```", text, re.DOTALL)
@@ -47,7 +47,55 @@ def _extract_json(text: str) -> dict:
     if match:
         return json.loads(match.group(0))
 
+    # Try to repair truncated JSON (close open brackets/braces)
+    match = re.search(r"\{.*", text, re.DOTALL)
+    if match:
+        partial = match.group(0)
+        repaired = _repair_truncated_json(partial)
+        if repaired:
+            return repaired
+
     raise ValueError("No valid JSON found in model output.")
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """
+    Attempt to repair truncated JSON by closing unclosed brackets.
+    Returns parsed dict or None if repair fails.
+    """
+    # Find the last complete question block
+    # Strategy: remove everything after the last complete question object,
+    # then close the arrays and root object.
+    try:
+        # Find all complete question objects ending with }
+        # Look for the last `"explanation_if_wrong"` field that has a complete value
+        last_complete = text.rfind('"explanation_if_wrong"')
+        if last_complete == -1:
+            return None
+
+        # Find the closing brace of that question object
+        pos = text.find('}', last_complete)
+        if pos == -1:
+            # Try to close the string and object
+            text = text.rstrip()
+            if not text.endswith('"'):
+                text += '"'
+            text += '}]}'
+        else:
+            # Check if there's a ] and } after
+            remaining = text[pos+1:].strip()
+            if remaining.startswith(','):
+                # Truncated after a complete question — close the array
+                text = text[:pos+1] + ']}'
+            elif not remaining:
+                text = text[:pos+1] + ']}'
+            else:
+                # Try the full remaining
+                text = text[:pos+1] + ']}'
+
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +138,7 @@ JSON Schema:
       "question_text": "string — the question",
       "options": ["option A", "option B", "option C", "option D"],
       "correct_answer": "option B",
-      "explanation_if_wrong": "string — a clear explanation of why the correct answer is right and why common wrong choices are wrong, referencing the transcript"
+      "explanation_if_wrong": "string — brief 1-2 sentence explanation"
     }
   ]
 }
@@ -100,9 +148,14 @@ Critical Rules:
 - Each question MUST have EXACTLY 4 options.
 - correct_answer MUST be the EXACT text of one of the 4 options (character-for-character match).
 - ALL questions must be answerable ONLY from the provided transcript text. Do NOT use external knowledge.
-- explanation_if_wrong should be educational — reference the specific part of the transcript that supports the answer.
+- Keep ALL text SHORT: options under 60 chars, explanations under 150 chars.
+- Do NOT prefix options with letters like "A)" or "B)" — just the answer text.
 - Vary the difficulty: include 2 easy, 2 medium, and 1 hard question.
 - Return ONLY the JSON object. Nothing else."""
+
+    import random
+    import time
+    seed = f"{time.time()}-{random.randint(1000, 9999)}"
 
     user_prompt = f"""Generate a Focus Mode quiz based on this video transcript.
 
@@ -112,6 +165,7 @@ Video Title: {payload.video_title}
 {transcript}
 --- END TRANSCRIPT ---
 
+To ensure variety, please select a DIFFERENT set of concepts to test than you normally would (Random Seed: {seed}).
 Return ONLY the JSON object. No other text."""
 
     try:
@@ -120,7 +174,8 @@ Return ONLY the JSON object. No other text."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=2048,
+            max_tokens=4096,
+            temperature=0.9,
         )
     except Exception as exc:
         print(f"[Quiz] HuggingFace API error: {exc}")

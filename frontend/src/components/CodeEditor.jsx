@@ -14,6 +14,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Editor from "@monaco-editor/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -30,7 +31,7 @@ const LANGUAGES = [
     label: "Python",
     icon: "🐍",
     monacoId: "python",
-    defaultCode: '# Write your Python code here...\n\nprint("Hello from ExplainAI Sandbox!")\n',
+    defaultCode: '# Write your Python code here...\n\nprint("Hello from Teacher AI Sandbox!")\n',
   },
   {
     id: "c",
@@ -38,7 +39,7 @@ const LANGUAGES = [
     icon: "⚙️",
     monacoId: "c",
     defaultCode:
-      '#include <stdio.h>\n\nint main() {\n    printf("Hello from ExplainAI Sandbox!\\n");\n    return 0;\n}\n',
+      '#include <stdio.h>\n\nint main() {\n    printf("Hello from Teacher AI Sandbox!\\n");\n    return 0;\n}\n',
   },
   {
     id: "cpp",
@@ -46,37 +47,57 @@ const LANGUAGES = [
     icon: "⚡",
     monacoId: "cpp",
     defaultCode:
-      '#include <iostream>\n\nint main() {\n    std::cout << "Hello from ExplainAI Sandbox!" << std::endl;\n    return 0;\n}\n',
+      '#include <iostream>\n\nint main() {\n    std::cout << "Hello from Teacher AI Sandbox!" << std::endl;\n    return 0;\n}\n',
   },
 ];
 
 // WebSocket URL — derive from current page origin for flexibility
-const WS_URL = `ws://${window.location.hostname}:8000/ws/execute`;
+const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
+const WS_URL = `ws://${host}:8000/ws/execute`;
 
-export default function CodeEditor({ initialCode = "", initialLang = "python", activeVideo, onTakeQuiz }) {
+export default function CodeEditor({ initialCode = "", initialLang = "python", activeVideo, onTakeQuiz, theme = "vs-dark" }) {
   const getLanguageConfig = (id) => LANGUAGES.find((l) => l.id === id) || LANGUAGES[0];
   const transcriptLoaded = Boolean(activeVideo?.transcript);
 
-  const [selectedLang, setSelectedLang] = useState(initialLang);
-  const [codeByLanguage, setCodeByLanguage] = useState(() => {
-    const defaultCodes = {};
-    LANGUAGES.forEach(l => {
-      defaultCodes[l.id] = l.defaultCode;
-    });
-    // Override the selected language with the initialCode if provided
-    if (initialCode) {
-      defaultCodes[initialLang] = initialCode;
+  const defaultFile = { id: "1", name: "main.py", language: "python", content: LANGUAGES[0].defaultCode };
+  const [files, setFiles] = useState(() => {
+    const saved = sessionStorage.getItem('aethernet_files');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.length > 0) return parsed;
+      } catch (e) { }
     }
-    return defaultCodes;
+    // Backward comp or first time
+    if (initialCode) {
+      return [{ ...defaultFile, language: initialLang, content: initialCode }];
+    }
+    return [defaultFile];
   });
+  const [activeFileId, setActiveFileId] = useState(files[0].id);
 
-  const code = codeByLanguage[selectedLang];
+  const activeFile = files.find(f => f.id === activeFileId) || files[0];
+  const selectedLang = activeFile.language;
+  const code = activeFile.content;
+
   const [isRunning, setIsRunning] = useState(false);
   const [exitStatus, setExitStatus] = useState(null); // "success" | "error" | null
   const [debugStatus, setDebugStatus] = useState(null); // null | "running" | "success" | "error"
   const [debugMessage, setDebugMessage] = useState("");
 
+  const [isEditorExpanded, setIsEditorExpanded] = useState(false);
+  const [isTerminalExpanded, setIsTerminalExpanded] = useState(false);
+
   const currentLang = getLanguageConfig(selectedLang);
+
+  // -----------------------------------------------------------------------
+  // Session Persistence: Save on Update
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (files && files.length > 0) {
+      sessionStorage.setItem('aethernet_files', JSON.stringify(files));
+    }
+  }, [files]);
 
   // Refs for xterm.js
   const terminalContainerRef = useRef(null);
@@ -87,12 +108,95 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
   const terminalInitialized = useRef(false);
   const inputBuffer = useRef("");      // Local line buffer for interactive input
   const terminalOutputRef = useRef(""); // Raw output from backend
+  const monacoEditorRef = useRef(null); // Reference to Monaco editor instance
+
+  const handleEditorDidMount = (editor) => {
+    monacoEditorRef.current = editor;
+  };
 
   // Store code in a ref so the WebSocket callback always has the latest value
   const codeRef = useRef(code);
+  const filesRef = useRef(files);
+  const activeFileRef = useRef(activeFile);
   const selectedLangRef = useRef(selectedLang);
+  
   useEffect(() => { codeRef.current = code; }, [code]);
+  useEffect(() => { filesRef.current = files; }, [files]);
+  useEffect(() => { activeFileRef.current = activeFile; }, [activeFile]);
   useEffect(() => { selectedLangRef.current = selectedLang; }, [selectedLang]);
+
+  // Refit terminal when pane expansion states change
+  useEffect(() => {
+    if (fitAddonRef.current) {
+      // Use a slight delay to ensure DOM and CSS transitions have completed
+      setTimeout(() => {
+        try {
+          fitAddonRef.current.fit();
+        } catch (e) {
+          console.error("Fit error:", e);
+        }
+      }, 50);
+      
+      // Also try immediately just in case
+      try {
+        fitAddonRef.current.fit();
+      } catch (e) {}
+    }
+  }, [isTerminalExpanded, isEditorExpanded]);
+
+  // Update terminal theme
+  useEffect(() => {
+    if (!terminalRef.current) return;
+    if (theme === "vs-light") {
+      terminalRef.current.options.theme = {
+        background: "#f1f5f9",
+        foreground: "#0f172a",
+        cursor: "#7c3aed",
+        selectionBackground: "rgba(124, 58, 237, 0.2)",
+        black: "#000000",
+        red: "#ef4444",
+        green: "#22c55e",
+        yellow: "#eab308",
+        blue: "#3b82f6",
+        magenta: "#a855f7",
+        cyan: "#06b6d4",
+        white: "#0f172a",
+        brightBlack: "#64748b",
+        brightRed: "#f87171",
+        brightGreen: "#4ade80",
+        brightYellow: "#fde047",
+        brightBlue: "#60a5fa",
+        brightMagenta: "#c084fc",
+        brightCyan: "#22d3ee",
+        brightWhite: "#ffffff",
+      };
+    } else {
+      terminalRef.current.options.theme = {
+        background: "#0d0b14",
+        foreground: "#c8d6e5",
+        cursor: "#8b5cf6",
+        cursorAccent: "#0d0b14",
+        selectionBackground: "rgba(139, 92, 246, 0.3)",
+        black: "#0d0b14",
+        red: "#ff6b6b",
+        green: "#a8e6cf",
+        yellow: "#ffa502",
+        blue: "#8b5cf6",
+        magenta: "#c084fc",
+        cyan: "#67e8f9",
+        white: "#c8d6e5",
+        brightBlack: "#64748b",
+        brightRed: "#f87171",
+        brightGreen: "#34d399",
+        brightYellow: "#fbbf24",
+        brightBlue: "#a78bfa",
+        brightMagenta: "#e879f9",
+        brightCyan: "#22d3ee",
+        brightWhite: "#f1f5f9",
+      };
+    }
+  }, [theme]);
+
 
   // -----------------------------------------------------------------------
   // Initialize xterm.js on mount
@@ -172,7 +276,28 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
 
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
-    setSelectedLang(newLang);
+    const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : "cpp";
+    const newDefaultCode = getLanguageConfig(newLang).defaultCode;
+
+    setFiles(prev => prev.map(f => {
+      if (f.id === activeFileId) {
+        let newName = f.name;
+        // Strip common extensions and append the new one
+        newName = newName.replace(/\.(py|c|cpp|js|txt)$/i, '');
+        newName = `${newName}.${ext}`;
+
+        // Update content to new default if it's currently empty or matches the old default
+        const oldDefaultCode = getLanguageConfig(f.language).defaultCode;
+        let newContent = f.content;
+        if (!f.content.trim() || f.content === oldDefaultCode) {
+          newContent = newDefaultCode;
+        }
+
+        return { ...f, language: newLang, name: newName, content: newContent };
+      }
+      return f;
+    }));
+    
     setExitStatus(null);
 
     // Reset terminal
@@ -188,10 +313,7 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
   // -----------------------------------------------------------------------
 
   const handleEditorChange = (value) => {
-    setCodeByLanguage((prev) => ({
-      ...prev,
-      [selectedLang]: value || "",
-    }));
+    setFiles((prev) => prev.map(f => f.id === activeFileId ? { ...f, content: value || "" } : f));
   };
 
   const handleRunCode = useCallback(() => {
@@ -233,7 +355,8 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
     ws.onopen = () => {
       // Send the code payload
       ws.send(JSON.stringify({
-        code: currentCode,
+        files: filesRef.current.map(f => ({ name: f.name, content: f.content })),
+        main_file: activeFileRef.current.name,
         language: lang,
       }));
 
@@ -311,9 +434,10 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
     const lang = selectedLangRef.current;
     const currentCode = codeRef.current;
     const terminalError = terminalOutputRef.current;
+    const debugTargetFileId = activeFileRef.current?.id;
 
     setDebugStatus("running");
-    setDebugMessage("✨ Connecting to E2B Sandbox...");
+    setDebugMessage("✨ Connecting to Local Sandbox...");
 
     orchestrateDebug(
       { code: currentCode, language: lang, terminal_error: terminalError },
@@ -323,20 +447,29 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
           setDebugMessage(`✨ ${chunk.message}`);
         } else if (chunk.type === "success") {
           setDebugStatus("success");
-          // Only update code if it actually changed
-          if (chunk.code && chunk.code !== currentCode) {
-            setDebugMessage("✅ Code fixed and applied to editor!");
-            setCodeByLanguage((prev) => ({
-              ...prev,
-              [lang]: chunk.code,
-            }));
-          } else {
-            setDebugMessage("✅ Code verified — no changes needed!");
+          if (chunk.code) {
+            console.log("[CodeEditor] Magic Wand Success!");
+            console.log("[CodeEditor] targeting file:", debugTargetFileId);
+            console.log("[CodeEditor] chunk.code:", chunk.code);
+
+            if (chunk.code !== currentCode) {
+              setDebugMessage("✅ Code fixed and applied to editor!");
+            } else {
+              setDebugMessage("✅ AI attempted to fix, but code was unchanged.");
+            }
+            setFiles((prev) => {
+              return prev.map(f => f.id === debugTargetFileId ? { ...f, content: chunk.code } : f);
+            });
+            // Forcefully bypass React state and explicitly tell Monaco Editor to update
+            // Only if the debugged file is still the active one
+            if (monacoEditorRef.current && activeFileRef.current?.id === debugTargetFileId) {
+              monacoEditorRef.current.setValue(chunk.code);
+            }
           }
           // Write clean output to terminal (skip raw JSON blobs)
           if (terminalRef.current && chunk.output) {
             const output = chunk.output.trim();
-            // Don't write raw E2B JSON structures to the terminal
+            // Don't write raw JSON structures to the terminal
             if (output && !output.startsWith("{") && !output.startsWith("[")) {
               terminalRef.current.writeln("\r\n\x1b[32m── DeepSeek Verified Output ──\x1b[0m");
               terminalRef.current.writeln(output);
@@ -386,109 +519,199 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
 
   // -----------------------------------------------------------------------
   // Render
-  // -----------------------------------------------------------------------
+  const [headerPortalTarget, setHeaderPortalTarget] = useState(null);
+  useEffect(() => {
+    setHeaderPortalTarget(document.getElementById("header-actions-portal"));
+  }, []);
+
+  const headerActions = (
+    <>
+      <div className="lang-selector-wrapper">
+        <select
+          id="language-selector"
+          className="lang-selector"
+          value={selectedLang}
+          onChange={handleLanguageChange}
+          disabled={isRunning}
+        >
+          {LANGUAGES.map((lang) => (
+            <option key={lang.id} value={lang.id}>
+              {lang.icon} {lang.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="editor-header__actions">
+        {/* Stop Button (visible while running) */}
+        {isRunning && (
+          <button
+            id="stop-code-button"
+            className="stop-exec-button"
+            onClick={handleStopCode}
+          >
+            <svg width="12" height="12" viewBox="0 0 18 18" fill="currentColor">
+              <rect x="3" y="3" width="12" height="12" rx="2" />
+            </svg>
+            Stop
+          </button>
+        )}
+
+        {/* Run Button */}
+        <button
+          id="run-code-button"
+          className="run-button"
+          onClick={handleRunCode}
+          disabled={isRunning}
+        >
+          {isRunning ? (
+            <>
+              <span
+                className="dot-pulse"
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  backgroundColor: "#fff",
+                  marginRight: "6px",
+                }}
+              />
+              Running...
+            </>
+          ) : (
+            <>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                style={{ marginRight: "6px" }}
+              >
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              Run Code
+            </>
+          )}
+        </button>
+
+        {/* ✨ Magic Wand Debugger */}
+        <button
+          id="magic-wand-button"
+          className="run-button run-button--secondary"
+          style={debugStatus === "running" ? { backgroundColor: "#6d28d9" } : {}}
+          onClick={handleMagicWand}
+          disabled={isRunning || debugStatus === "running"}
+          title="Debug this code automatically using DeepSeek"
+        >
+          {debugStatus === "running" ? (
+            <>
+              <span className="dot-pulse" style={{ width: "6px", height: "6px", backgroundColor: "#fff", marginRight: "6px" }} />
+              Fixing...
+            </>
+          ) : (
+            "🤖 Debug with AI"
+          )}
+        </button>
+
+        {/* 🎯 Take Quiz Button */}
+        <button
+          id="take-quiz-button"
+          className="run-button run-button--outline"
+          onClick={onTakeQuiz}
+          disabled={!transcriptLoaded}
+          title={transcriptLoaded ? "Enter Focus Mode — AI-generated quiz from this video" : "Waiting for transcript to load..."}
+        >
+          🎯 Take Quiz
+        </button>
+      </div>
+    </>
+  );
 
   return (
     <div className="code-editor-container">
+      {headerPortalTarget && createPortal(headerActions, headerPortalTarget)}
+
       {/* Top Pane: Monaco Editor */}
-      <div className="editor-pane">
+      <div className={`editor-pane ${isEditorExpanded ? "expanded-pane" : ""}`}>
         <div className="editor-header">
-          {/* Language Selector */}
-          <div className="lang-selector-wrapper">
-            <select
-              id="language-selector"
-              className="lang-selector"
-              value={selectedLang}
-              onChange={handleLanguageChange}
-              disabled={isRunning}
-            >
-              {LANGUAGES.map((lang) => (
-                <option key={lang.id} value={lang.id}>
-                  {lang.icon} {lang.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="editor-header__actions">
-            {/* Stop Button (visible while running) */}
-            {isRunning && (
-              <button
-                id="stop-code-button"
-                className="stop-exec-button"
-                onClick={handleStopCode}
-              >
-                <svg width="12" height="12" viewBox="0 0 18 18" fill="currentColor">
-                  <rect x="3" y="3" width="12" height="12" rx="2" />
-                </svg>
-                Stop
-              </button>
-            )}
-
-            {/* Run Button */}
-            <button
-              id="run-code-button"
-              className="run-button"
-              onClick={handleRunCode}
-              disabled={isRunning}
-            >
-              {isRunning ? (
-                <>
-                  <span
-                    className="dot-pulse"
-                    style={{
-                      width: "6px",
-                      height: "6px",
-                      backgroundColor: "#fff",
-                      marginRight: "6px",
+          <div className="editor-tabs">
+            {files.map(f => {
+              const langConf = getLanguageConfig(f.language);
+              return (
+                <div 
+                  key={f.id} 
+                  className={`editor-tab ${f.id === activeFileId ? "active" : ""}`}
+                  onClick={() => setActiveFileId(f.id)}
+                >
+                  <span className="editor-tab-icon">{langConf.icon}</span>
+                  <span 
+                    className="editor-tab-title" 
+                    contentEditable
+                    suppressContentEditableWarning
+                    spellCheck={false}
+                    onBlur={(e) => {
+                       const newName = e.target.innerText.trim();
+                       if(newName) {
+                         let newLang = f.language;
+                         if (newName.endsWith(".py")) newLang = "python";
+                         else if (newName.endsWith(".c")) newLang = "c";
+                         else if (newName.endsWith(".cpp")) newLang = "cpp";
+                         
+                         setFiles(prev => prev.map(pf => pf.id === f.id ? {...pf, name: newName, language: newLang} : pf));
+                       }
                     }}
-                  />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    style={{ marginRight: "6px" }}
+                    onKeyDown={(e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
                   >
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                  Run Code
-                </>
-              )}
-            </button>
-
-            {/* 🎯 Take Quiz Button */}
-            <button
-              id="take-quiz-button"
-              className="run-button"
-              onClick={onTakeQuiz}
-              disabled={!transcriptLoaded}
-              title={transcriptLoaded ? "Enter Focus Mode — AI-generated quiz from this video" : "Waiting for transcript to load..."}
+                    {f.name}
+                  </span>
+                  {files.length > 1 && (
+                    <button 
+                      className="editor-tab-close" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFiles(prev => prev.filter(pf => pf.id !== f.id));
+                        if(activeFileId === f.id) {
+                          const remaining = files.filter(pf => pf.id !== f.id);
+                          if(remaining.length > 0) setActiveFileId(remaining[0].id);
+                        }
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <button 
+              className="icon-btn" 
+              style={{ marginLeft: '4px', padding: '4px' }}
+              title="Add File"
+              onClick={() => {
+                const newId = Date.now().toString();
+                const newLang = selectedLang;
+                const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : "cpp";
+                const langConfig = getLanguageConfig(newLang);
+                
+                setFiles(prev => [...prev, { 
+                  id: newId, 
+                  name: `file_${prev.length+1}.${ext}`, 
+                  language: newLang, 
+                  content: langConfig.defaultCode 
+                }]);
+                setActiveFileId(newId);
+              }}
             >
-              🎯 Take Quiz
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             </button>
-
-            {/* ✨ Magic Wand Debugger */}
-            <button
-              id="magic-wand-button"
-              className="run-button"
-              style={{ backgroundColor: debugStatus === "running" ? "#6d28d9" : "#8b5cf6" }}
-              onClick={handleMagicWand}
-              disabled={isRunning || debugStatus === "running"}
-              title="Debug this code automatically using DeepSeek"
-            >
-              {debugStatus === "running" ? (
-                <>
-                  <span className="dot-pulse" style={{ width: "6px", height: "6px", backgroundColor: "#fff", marginRight: "6px" }} />
-                  Fixing...
-                </>
-              ) : (
-                "✨ Debug with AI"
-              )}
+          </div>
+          <div className="editor-window-actions">
+            <button className="icon-btn" title={isEditorExpanded ? "Collapse" : "Expand"} onClick={() => setIsEditorExpanded(!isEditorExpanded)}>
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                 {isEditorExpanded ? (
+                    <><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></>
+                 ) : (
+                    <><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></>
+                 )}
+               </svg>
             </button>
           </div>
         </div>
@@ -497,9 +720,10 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
           <Editor
             height="100%"
             language={currentLang.monacoId}
-            theme="vs-dark"
+            theme={theme}
             value={code}
             onChange={handleEditorChange}
+            onMount={handleEditorDidMount}
             options={{
               minimap: { enabled: false },
               fontSize: 14,
@@ -514,49 +738,78 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
       </div>
 
       {/* Bottom Pane: Xterm.js Terminal */}
-      <div className="terminal-pane">
+      <div className={`terminal-pane ${isTerminalExpanded ? "expanded-pane" : ""}`}>
         <div className="terminal-header">
-          <span className="terminal-title">
+          <div className="terminal-title">
             <svg
-              width="13"
-              height="13"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              style={{ marginRight: "6px", verticalAlign: "-1px" }}
+              style={{ marginRight: "8px", verticalAlign: "-2px" }}
             >
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
+              <polyline points="9 18 15 12 9 6" />
             </svg>
-            Interactive Terminal
-          </span>
-          {exitStatus && (
-            <span
-              className={`terminal-badge ${
-                exitStatus === "error" ? "badge-error" : "badge-success"
-              }`}
+            Terminal
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ marginLeft: "8px", verticalAlign: "-2px", color: "var(--color-text-muted)" }}
             >
-              {exitStatus === "error" ? "Failed" : "Success"}
-            </span>
-          )}
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
+          <div className="terminal-actions">
+            {exitStatus && (
+              <span
+                className={`terminal-badge ${exitStatus === "error" ? "badge-error" : "badge-success"
+                  }`}
+              >
+                {exitStatus === "error" ? "Failed" : "Success"}
+              </span>
+            )}
+            <button className="icon-text-btn" onClick={() => terminalRef.current?.clear()}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              Clear
+            </button>
+            <button className="icon-btn" title={isTerminalExpanded ? "Collapse" : "Expand"} onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}>
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                 {isTerminalExpanded ? (
+                    <><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></>
+                 ) : (
+                    <><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></>
+                 )}
+               </svg>
+            </button>
+          </div>
         </div>
         {debugMessage && (
           <div style={{
             padding: "6px 14px",
             fontSize: "12px",
             fontFamily: "'Fira Code', monospace",
-            background: debugStatus === "error" ? "rgba(239,68,68,0.15)" : debugStatus === "success" ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)",
-            color: debugStatus === "error" ? "#f87171" : debugStatus === "success" ? "#4ade80" : "#c4b5fd",
-            borderBottom: "1px solid rgba(139,92,246,0.2)",
+            background: debugStatus === "error" ? "rgba(239,68,68,0.15)" : debugStatus === "success" ? "rgba(34,197,94,0.15)" : "rgba(45,212,191,0.15)",
+            color: debugStatus === "error" ? "#f87171" : debugStatus === "success" ? "#4ade80" : "#2dd4bf",
+            borderBottom: "1px solid rgba(45,212,191,0.2)",
             display: "flex",
             alignItems: "center",
             gap: "8px",
           }}>
             {debugStatus === "running" && (
-              <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#8b5cf6", animation: "pulse 1.5s ease-in-out infinite" }} />
+              <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#2dd4bf", animation: "pulse 1.5s ease-in-out infinite" }} />
             )}
             {debugMessage}
           </div>

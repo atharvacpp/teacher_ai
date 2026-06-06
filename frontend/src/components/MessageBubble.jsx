@@ -14,7 +14,7 @@ export default function MessageBubble({ role, content }) {
   return (
     <div className={`message-row ${isUser ? "message-row--user" : "message-row--ai"}`}>
       {/* Small role label above the bubble */}
-      <span className="message-label">{isUser ? "You" : "ExplainAI"}</span>
+      <span className="message-label">{isUser ? "You" : "Teacher AI"}</span>
 
       <div className={`message-bubble ${isUser ? "message-bubble--user" : "message-bubble--ai"}`}>
         {content}

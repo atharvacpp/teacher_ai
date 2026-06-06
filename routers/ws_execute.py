@@ -153,15 +153,24 @@ async def ws_execute(websocket: WebSocket):
             await websocket.close()
             return
 
-        code = payload.get("code", "").strip()
         language = payload.get("language", "python").lower()
+        files = payload.get("files", [])
+        
+        # Backwards compatibility for old clients sending { "code": "..." }
+        if not files and "code" in payload:
+            ext = LANGUAGE_CONFIG.get(language, {}).get("ext", ".py" if language == "python" else "")
+            main_file_name = "script.py" if language == "python" else f"code{ext}"
+            files = [{"name": main_file_name, "content": payload.get("code", "")}]
+            main_file = main_file_name
+        else:
+            main_file = payload.get("main_file", files[0]["name"] if files else "")
 
-        print(f"[ws_execute] Received {len(code)} chars of {language} code")
-
-        if not code:
-            await websocket.send_text(f"{ANSI_RED}No code provided.{ANSI_RESET}\r\n")
+        if not files:
+            await websocket.send_text(f"{ANSI_RED}No code or files provided.{ANSI_RESET}\r\n")
             await websocket.close()
             return
+
+        print(f"[ws_execute] Received {len(files)} files, main_file: {main_file}, language: {language}")
 
         if language not in LANGUAGE_CONFIG:
             await websocket.send_text(
@@ -174,30 +183,30 @@ async def ws_execute(websocket: WebSocket):
         # --- 2. Write code to temp dir ---
         tmpdir = tempfile.mkdtemp(prefix="ws_sandbox_")
 
-        if language == "python":
-            script_path = os.path.join(tmpdir, "script.py")
-            with open(script_path, "w", newline="\n") as f:
-                f.write(code)
+        # Write all files
+        for fobj in files:
+            fname = fobj.get("name", "unnamed")
+            # sanitize filename to prevent path traversal
+            fname = os.path.basename(fname)
+            fcontent = fobj.get("content", "")
+            fpath = os.path.join(tmpdir, fname)
+            with open(fpath, "w", newline="\n") as f:
+                f.write(fcontent)
 
+        if language == "python":
             # Docker command: mount tmpdir → /code, override entrypoint
             # python3 -u disables output buffering so prompts flush immediately
             docker_args = _docker_base_args() + [
                 "-v", f"{tmpdir}:/code",
                 "--entrypoint", "python3",
                 DOCKER_IMAGE,
-                "-u", "/code/script.py",
+                "-u", f"/code/{main_file}",
             ]
 
         else:
             # C or C++
             config = LANGUAGE_CONFIG[language]
-            ext = config["ext"]
             compiler = config["compiler"]
-            src_filename = f"code{ext}"
-            src_path = os.path.join(tmpdir, src_filename)
-
-            with open(src_path, "w", newline="\n") as f:
-                f.write(code)
 
             await websocket.send_text(
                 f"{ANSI_DIM}Compiling {language.upper()} code...{ANSI_RESET}\r\n"
@@ -207,7 +216,7 @@ async def ws_execute(websocket: WebSocket):
             # stdbuf forces unbuffered stdout/stderr so prompts appear
             # immediately before scanf/cin blocks, even without newlines.
             shell_cmd = (
-                f"{compiler} /code/{src_filename} -o /code/code_exec -lm && "
+                f"{compiler} /code/{main_file} -o /code/code_exec -lm && "
                 f"stdbuf -o0 -e0 /code/code_exec"
             )
 

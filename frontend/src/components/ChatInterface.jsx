@@ -15,12 +15,11 @@
 
 import { useState, useRef, useEffect } from "react";
 import MessageBubble from "./MessageBubble";
+import { useChatStream } from "../hooks/useChatStream";
 import {
-  sendChatMessage,
   transcribeAudio,
   uploadFile,
   processYouTubeVideo,
-  abortActiveRequest,
 } from "../services/api";
 
 // ---------------------------------------------------------------------------
@@ -65,14 +64,43 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
   // State
   // -----------------------------------------------------------------------
   const [input, setInput] = useState("");           // Controlled text input
-  const [messages, setMessages] = useState([]);     // Chat history
+  const [messages, setMessages] = useState(() => {
+    const saved = sessionStorage.getItem('aethernet_chat_history');
+    console.log('Loading from sessionStorage (chat_history):', saved);
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      // If the user refreshes while audio is generating, the request dies.
+      // We must clear the pending state so it doesn't spin forever.
+      return parsed.map(msg => ({ ...msg, audioPending: false }));
+    } catch (e) {
+      return [];
+    }
+  });     // Chat history
   const [loading, setLoading] = useState(false);    // "Thinking…" indicator
+  const [statusText, setStatusText] = useState(""); // Granular loading status
   const [isRecording, setIsRecording] = useState(false);   // Mic active?
   const [transcribing, setTranscribing] = useState(false); // ASR in-flight?
   const [selectedFile, setSelectedFile] = useState(null);  // File attachment
   const [forceVision, setForceVision] = useState(false);   // Handwriting mode
+  
   const [showYouTubeInput, setShowYouTubeInput] = useState(false); // YT bar visible?
   const [youtubeUrl, setYoutubeUrl] = useState("");                // YT URL value
+
+  const { streamAssistantReply, stopGeneration } = useChatStream({
+    setMessages,
+    setLoading,
+    setStatusText,
+  });
+
+  // -----------------------------------------------------------------------
+  // Session Persistence: Save on Update
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      sessionStorage.setItem('aethernet_chat_history', JSON.stringify(messages));
+    }
+  }, [messages]);
 
   // Refs
   const messagesEndRef = useRef(null);
@@ -93,17 +121,40 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
 
   /** Called when the user clicks the "Stop ⏹" button. */
   function handleStop() {
-    abortActiveRequest();
-    setLoading(false);
+    stopGeneration();
   }
 
   // -----------------------------------------------------------------------
   // Chat Handler
   // -----------------------------------------------------------------------
 
+  async function submitPrompt(promptText) {
+    if (loading) return;
+    
+    const userMessage = { role: "user", content: promptText };
+    const updatedMessages = [...messages, userMessage];
+    
+    setMessages(updatedMessages);
+    setInput("");
+    setLoading(true);
+    setStatusText("");
+    
+    try {
+      await streamAssistantReply(updatedMessages);
+    } catch (error) {
+      if (
+        error.message !== "Generation stopped by user." &&
+        !error.message.includes("Error in input stream") &&
+        error.name !== "AbortError"
+      ) {
+        setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ Something went wrong: ${error.message}` }]);
+      }
+    }
+  }
+
   /** Called when the user clicks "Send" or presses Enter. */
   async function handleSubmit(e) {
-    e.preventDefault();
+    e?.preventDefault();
 
     const trimmed = input.trim();
     // Allow submission if there is a file OR text
@@ -136,13 +187,16 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
           onVideoDetect({ id: videoId, title: "YouTube Video", transcript: response.transcript });
         }
       } catch (error) {
-        if (error.message === "Generation stopped by user.") {
-          setMessages((prev) => [...prev, { role: "assistant", content: "⏹ Generation stopped." }]);
-        } else {
+        if (
+          error.message !== "Generation stopped by user." &&
+          !error.message.includes("Error in input stream") &&
+          error.name !== "AbortError"
+        ) {
           setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ Something went wrong: ${error.message}` }]);
         }
       } finally {
         setLoading(false);
+        setStatusText("");
       }
       return;
     }
@@ -162,53 +216,72 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
     const fileToUpload = selectedFile;
     setSelectedFile(null); // Clear the attachment chip
     setLoading(true);   // Show the "Thinking…" indicator
+    setStatusText("");  // Clear previous status
 
     try {
-      let explanation, audio_base64;
-      
       // 3. Branch logic based on whether a file is attached
       if (fileToUpload) {
-        // Send file + prompt directly to /upload (ignores prior chat history)
-        const response = await uploadFile(fileToUpload, trimmed, forceVision);
-        explanation = response.explanation;
-        audio_base64 = response.audio_base64;
+        const assistantMsgId = `msg-${Date.now()}-${Math.random()}`;
+        setMessages((prev) => [...prev, { id: assistantMsgId, role: "assistant", content: "", audio_base64: null, audioPending: true }]);
+        let finalTranscript = null;
 
-        // If it's a local video upload, the backend generates a transcript.
-        // We must capture this to enable the "Take Quiz" button!
-        if (fileToUpload.type?.startsWith("video/") && response.transcript && onVideoDetect) {
-          onVideoDetect({ 
-            id: `local-${Date.now()}`, 
-            title: fileToUpload.name, 
-            transcript: response.transcript 
-          });
-        }
+        await uploadFile(
+          fileToUpload,
+          trimmed,
+          forceVision,
+          (chunk) => {
+            setMessages((prev) => prev.map(m => 
+              m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m
+            ));
+          },
+          (audio) => {
+            setMessages((prev) => prev.map(m => 
+              m.id === assistantMsgId ? { ...m, audio_base64: audio, audioPending: false } : m
+            ));
+          },
+          (transcript) => {
+            finalTranscript = transcript;
+          },
+          () => {
+            // onDone: stream fully closed (after TTS)
+            setLoading(false); // Fallback
+            setStatusText("");
+            setMessages((prev) => prev.map(m => 
+              m.id === assistantMsgId ? { ...m, audioPending: false } : m
+            ));
+          },
+          (status) => {
+            setStatusText(status);
+          },
+          () => {
+            // onTextComplete: text finished — unlock UI, enable quiz
+            setLoading(false);
+            setStatusText("");
+            if (fileToUpload.type?.startsWith("video/") && finalTranscript && onVideoDetect) {
+              onVideoDetect({ 
+                id: `local-${Date.now()}`, 
+                title: fileToUpload.name, 
+                transcript: finalTranscript 
+              });
+            }
+          }
+        );
       } else {
-        // Send the ENTIRE conversation history to the backend
-        const response = await sendChatMessage(updatedMessages);
-        explanation = response.explanation;
-        audio_base64 = response.audio_base64;
+        await streamAssistantReply(updatedMessages);
       }
-
-      // 4. Append the assistant response (must use "assistant" role for HF API)
-      const assistantMessage = { role: "assistant", content: explanation, audio_base64 };
-      setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
       // Distinguish user-initiated stops from real errors
-      if (error.message === "Generation stopped by user.") {
-        const stopMessage = {
-          role: "assistant",
-          content: "⏹ Generation stopped.",
-        };
-        setMessages((prev) => [...prev, stopMessage]);
-      } else {
+      if (
+        !error.message.includes("Error in input stream") &&
+        error.message !== "Generation stopped by user." &&
+        error.name !== "AbortError"
+      ) {
         const errorMessage = {
           role: "assistant",
           content: `⚠️ Something went wrong: ${error.message}`,
         };
         setMessages((prev) => [...prev, errorMessage]);
       }
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -349,28 +422,59 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
     setLoading(true);
 
     try {
-      const response = await processYouTubeVideo(url);
-      const assistantMessage = {
-        role: "assistant",
-        content: response.explanation,
-        audio_base64: response.audio_base64,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      
-      // Pass the fully loaded transcript up to App.jsx for the Quiz Engine
-      if (videoId && onVideoDetect) {
-        onVideoDetect({ id: videoId, title: "YouTube Video", transcript: response.transcript });
-      }
+      const assistantMsgId = `msg-${Date.now()}-${Math.random()}`;
+      setMessages((prev) => [...prev, { id: assistantMsgId, role: "assistant", content: "", audio_base64: null, audioPending: true }]);
+      let finalTranscript = null;
+
+      await processYouTubeVideo(
+        url,
+        (chunk) => {
+          setMessages((prev) => prev.map(m => 
+            m.id === assistantMsgId ? { ...m, content: m.content + chunk } : m
+          ));
+        },
+        (audio) => {
+          setMessages((prev) => prev.map(m => 
+            m.id === assistantMsgId ? { ...m, audio_base64: audio, audioPending: false } : m
+          ));
+        },
+        (transcript) => {
+          finalTranscript = transcript;
+        },
+        () => {
+          // onDone: stream fully closed (after TTS)
+          setLoading(false); // Fallback
+          setMessages((prev) => prev.map(m => 
+            m.id === assistantMsgId ? { ...m, audioPending: false } : m
+          ));
+        },
+        (status) => {
+          setStatusText(status);
+        },
+        () => {
+          // onTextComplete: text finished — unlock UI, enable quiz immediately
+          setLoading(false);
+          setStatusText("");
+          if (videoId && onVideoDetect && finalTranscript) {
+            onVideoDetect({ id: videoId, title: "YouTube Video", transcript: finalTranscript });
+          }
+        }
+      );
     } catch (error) {
-      if (error.message === "Generation stopped by user.") {
-        setMessages((prev) => [...prev, { role: "assistant", content: "⏹ Generation stopped." }]);
-      } else {
+      if (
+        error.message !== "Generation stopped by user." &&
+        !error.message.includes("Error in input stream") &&
+        error.name !== "AbortError"
+      ) {
         setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ Something went wrong: ${error.message}` }]);
       }
     } finally {
       setLoading(false);
     }
   }
+
+  const lastMessage = messages[messages.length - 1];
+  const isStreaming = lastMessage?.role === "assistant" && lastMessage?.content !== "";
 
   // -----------------------------------------------------------------------
   // Render
@@ -379,23 +483,104 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
     <div className="chat-container">
       {/* ---- Header ---- */}
       <header className="chat-header">
-        <div className="chat-header__icon">✨</div>
-        <div>
-          <h1 className="chat-header__title">ExplainAI</h1>
-          <p className="chat-header__subtitle">
-            Powered by Qwen 2.5 &mdash; Phase 4
-          </p>
+        <div className="chat-header-info">
+          <div className="chat-header__icon">✨</div>
+          <div className="chat-header__titles">
+            <h1 className="chat-header__title">Teacher AI</h1>
+            <p className="chat-header__subtitle">
+              Your personal AI coding teacher
+            </p>
+          </div>
         </div>
+        <button className="new-chat-btn" onClick={() => setMessages([])}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: "6px", verticalAlign: "-2px"}}>
+             <path d="M12 5v14M5 12h14"/>
+          </svg>
+          New Chat
+        </button>
       </header>
 
       {/* ---- Message Area ---- */}
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
-            <p className="chat-empty__icon">💬</p>
-            <p className="chat-empty__text">
-              Ask me anything — type or use the mic 🎙️
-            </p>
+            <div className="empty-greeting">
+              <span className="empty-greeting-icon">👋</span>
+              <div className="empty-greeting-text">
+                <h2>Hello! I'm your AI coding teacher.</h2>
+                <p>I can help you learn, debug, and build amazing projects.<br/>What would you like to learn or ask today?</p>
+              </div>
+            </div>
+
+            <div className="empty-suggestions-wrapper">
+              <p className="empty-suggestions-title">Try asking about</p>
+              <div className="empty-suggestions-grid">
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain Python basics like variables and data types.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>Python Basics</h4>
+                    <p>Variables, data types, I/O</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain Python Data Structures like lists, tuples, dictionaries.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>Data Structures</h4>
+                    <p>Lists, tuples, dictionaries</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain Python Control Flow: if-else, loops, conditions.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 16 16 12 12 8"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>Control Flow</h4>
+                    <p>If-else, loops, conditions</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain File Handling in Python: reading and writing files.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>File Handling</h4>
+                    <p>Reading and writing files</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain Python Functions: defining, calling, returning.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="8" x2="12" y2="16"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>Functions</h4>
+                    <p>Defining, calling, returning</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+                <button className="suggestion-card" onClick={() => submitPrompt("Explain Object Oriented Programming in Python: classes, objects, inheritance.")}>
+                  <div className="suggestion-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                  </div>
+                  <div className="suggestion-text">
+                    <h4>OOP in Python</h4>
+                    <p>Classes, objects, inheritance</p>
+                  </div>
+                  <div className="suggestion-arrow">›</div>
+                </button>
+              </div>
+            </div>
+
+            <div className="empty-divider">
+              <span>or ask anything...</span>
+            </div>
           </div>
         )}
 
@@ -405,7 +590,7 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
           const transcriptLoaded = isThisActiveVideo && Boolean(activeVideo?.transcript);
 
           return (
-            <div key={idx} className="message-container">
+            <div key={msg.id ?? idx} className="message-container">
               <MessageBubble 
                 role={msg.role} 
                 content={msg.content} 
@@ -426,31 +611,59 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
                 </div>
               )}
 
+              {msg.role === "assistant" && msg.audioPending && !msg.audio_base64 && (
+                <p className="audio-pending-indicator" aria-live="polite">
+                  Preparing audio…
+                </p>
+              )}
+
               {msg.role === "assistant" && msg.audio_base64 && (
-                <audio controls src={`data:audio/mpeg;base64,${msg.audio_base64}`} className="mt-3 w-full" />
+                <audio
+                  controls
+                  src={`data:audio/mpeg;base64,${msg.audio_base64}`}
+                  className="message-audio-player mt-3 w-full"
+                />
               )}
             </div>
           );
         })}
 
-        {/* Thinking indicator with Stop button */}
+        {/* Thinking indicator / Stop Button */}
         {loading && (
-          <div className="message-row message-row--ai">
-            <span className="message-label">ExplainAI</span>
-            <div className="message-bubble message-bubble--ai thinking-bubble">
-              <span className="dot-pulse" />
-              {selectedFile?.type?.startsWith("video/") ? "Analyzing video..." : "Thinking…"}
-              <button
-                id="stop-generation"
-                className="stop-button"
-                type="button"
-                onClick={handleStop}
-                title="Stop generation"
-                aria-label="Stop generation"
-              >
-                Stop ⏹
-              </button>
-            </div>
+          <div className="message-row message-row--ai" style={{ width: isStreaming ? "100%" : "auto", maxWidth: "100%" }}>
+            {!isStreaming && (
+              <>
+                <span className="message-label">Teacher AI</span>
+                <div className="message-bubble message-bubble--ai thinking-bubble">
+                  <span className="dot-pulse" />
+                  {statusText ? statusText : selectedFile?.type?.startsWith("video/") ? "Analyzing video..." : "Thinking…"}
+                  <button
+                    id="stop-generation"
+                    className="stop-button"
+                    type="button"
+                    onClick={handleStop}
+                    title="Stop generation"
+                    aria-label="Stop generation"
+                  >
+                    Stop ⏹
+                  </button>
+                </div>
+              </>
+            )}
+            {isStreaming && (
+              <div style={{ display: "flex", justifyContent: "center", marginTop: "8px", width: "100%" }}>
+                <button
+                  id="stop-generation"
+                  className="stop-button"
+                  type="button"
+                  onClick={handleStop}
+                  title="Stop generation"
+                  aria-label="Stop generation"
+                >
+                  Stop ⏹
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -498,7 +711,7 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                     <circle cx="12" cy="12" r="3" />
                   </svg>
-                  📄 Analyze Handwriting or Complex Structures
+                  Analyze Handwriting or Complex Structures
                   <span className="vision-toggle__badge">Slower</span>
                 </span>
               </label>
@@ -549,88 +762,96 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
             accept="image/*,application/pdf,video/*"
             onChange={handleFileChange}
           />
-          
-          {/* File Attachment Button */}
-          <button
-            type="button"
-            className="file-attach-btn"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading || transcribing}
-            title="Attach file"
-            aria-label="Attach file"
-          >
-            {/* Paperclip Icon */}
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
 
-          {/* YouTube Button */}
-          <button
-            id="youtube-toggle"
-            type="button"
-            className={`youtube-btn ${showYouTubeInput ? "youtube-btn--active" : ""}`}
-            onClick={() => setShowYouTubeInput((prev) => !prev)}
-            disabled={loading || transcribing}
-            title="Explain a YouTube video"
-            aria-label="YouTube video input"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-            </svg>
-          </button>
+          <div className="chat-input-box">
+            <textarea
+              id="chat-input"
+              className="chat-input"
+              placeholder={
+                transcribing
+                  ? "Transcribing your voice…"
+                  : isRecording
+                  ? "🎙️ Listening…"
+                  : "Type your question here..."
+              }
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              disabled={loading || isRecording}
+              autoFocus
+              rows={1}
+            />
 
-          {/* Microphone button */}
-          <button
-          id="mic-button"
-          className={`mic-button ${isRecording ? "mic-button--recording" : ""}`}
-          type="button"
-          onClick={handleMicClick}
-          disabled={loading || transcribing}
-          title={isRecording ? "Stop recording" : "Start voice input"}
-          aria-label={isRecording ? "Stop recording" : "Start voice input"}
-        >
-          {isRecording ? (
-            /* Stop icon — a filled square */
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-              <rect x="3" y="3" width="12" height="12" rx="2" />
-            </svg>
-          ) : (
-            /* Microphone icon */
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="1" width="6" height="12" rx="3" />
-              <path d="M5 10a7 7 0 0 0 14 0" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-            </svg>
-          )}
-        </button>
+            <div className="chat-input-footer">
+              <div className="chat-input-actions">
+                <button
+                  type="button"
+                  className="action-icon-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || transcribing}
+                  title="Attach file"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
 
-        <input
-          id="chat-input"
-          className="chat-input"
-          type="text"
-          placeholder={
-            transcribing
-              ? "Transcribing your voice…"
-              : isRecording
-              ? "🎙️ Listening…"
-              : "Type your question here..."
-          }
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading || isRecording}
-          autoFocus
-        />
-        <button
-          id="chat-submit"
-          className="chat-submit"
-          type="submit"
-          disabled={loading || (!input.trim() && !selectedFile) || isRecording || transcribing}
-        >
-          {loading ? "…" : "Send"}
-        </button>
-      </form>
+                <button
+                  id="mic-button"
+                  className={`action-icon-btn ${isRecording ? "action-icon-btn--recording" : ""}`}
+                  type="button"
+                  onClick={handleMicClick}
+                  disabled={loading || transcribing}
+                  title={isRecording ? "Stop recording" : "Start voice input"}
+                >
+                  {isRecording ? (
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+                      <rect x="4" y="4" width="10" height="10" rx="2" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="1" width="6" height="12" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <line x1="12" y1="17" x2="12" y2="21" />
+                      <line x1="8" y1="21" x2="16" y2="21" />
+                    </svg>
+                  )}
+                </button>
+
+                <button
+                  id="youtube-toggle"
+                  type="button"
+                  className={`action-icon-btn ${showYouTubeInput ? "action-icon-btn--active" : ""}`}
+                  onClick={() => setShowYouTubeInput((prev) => !prev)}
+                  disabled={loading || transcribing}
+                  title="Explain a YouTube video"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                  </svg>
+                </button>
+              </div>
+
+              <button
+                id="chat-submit"
+                className="chat-submit-btn"
+                type="submit"
+                disabled={loading || (!input.trim() && !selectedFile) || isRecording || transcribing}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: 6}}>
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+                {loading ? "..." : "Send"}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );

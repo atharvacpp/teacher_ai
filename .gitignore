@@ -50,6 +50,10 @@ models/
 *.mp4
 *.mov
 *.avi
+*.pdf
+*.jpg
+*.jpeg
+*.png
 recordings/
 temp_audio/
 

@@ -1,141 +1,96 @@
 /**
  * App.jsx — Root component for the ExplainAI React frontend.
  *
- * Layout: AI Tutor | Workbench (two horizontal panels).
- * YouTube videos render inline in the chat feed, not as a separate panel.
+ * Layout: Fixed 50/50 split dashboard.
  */
 
 import { useEffect, useState } from "react";
-import {
-  Group as PanelGroup,
-  Panel,
-  Separator as PanelResizeHandle,
-  usePanelRef,
-} from "react-resizable-panels";
 import ChatInterface from "./components/ChatInterface";
 import CodeEditor from "./components/CodeEditor";
 import QuizModal from "./components/QuizModal";
 import "./App.css";
 
-function usePanelCollapsed(panelRef, collapsed) {
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-    if (collapsed) {
-      if (!panel.isCollapsed()) panel.collapse();
-    } else if (panel.isCollapsed()) {
-      panel.expand();
-    }
-  }, [panelRef, collapsed]);
-}
-
 export default function App() {
-  const [showAgent, setShowAgent] = useState(false);
-  const [showEditor, setShowEditor] = useState(false);
-  const [activeVideo, setActiveVideo] = useState(null); // { id, title, transcript }
+  const [activeVideo, setActiveVideo] = useState(() => {
+    const saved = sessionStorage.getItem('aethernet_transcript');
+    console.log('Loading from sessionStorage (transcript):', saved);
+    return saved ? JSON.parse(saved) : null;
+  }); // { id, title, transcript }
+  
   const [showQuiz, setShowQuiz] = useState(false);
 
-  const tutorPanelRef = usePanelRef();
-  const workbenchPanelRef = usePanelRef();
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem('aethernet_theme') || "vs-dark";
+  });
 
-  const tutorCollapsed = !showAgent;
-  const workbenchCollapsed = !showEditor;
+  useEffect(() => {
+    localStorage.setItem('aethernet_theme', theme);
+  }, [theme]);
 
-  usePanelCollapsed(tutorPanelRef, tutorCollapsed);
-  usePanelCollapsed(workbenchPanelRef, workbenchCollapsed);
-
-  const noneOpen = !showAgent && !showEditor;
-  const showHandle = showAgent && showEditor;
+  // -----------------------------------------------------------------------
+  // Session Persistence: Save on Update
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (activeVideo) {
+      sessionStorage.setItem('aethernet_transcript', JSON.stringify(activeVideo));
+    }
+  }, [activeVideo]);
 
   return (
-    <div className="app">
-      <div className="toggle-bar">
-        <button
-          id="toggle-agent"
-          className={`toggle-btn ${showAgent ? "toggle-btn--active" : ""}`}
-          onClick={() => setShowAgent((prev) => !prev)}
-        >
-          <span className="toggle-btn__icon">✨</span>
-          <span className="toggle-btn__label">
-            {showAgent ? "Close AI Teacher" : "Open AI Teacher"}
-          </span>
-        </button>
+    <div className={`app ${theme === "vs-light" ? "light-theme" : ""}`}>
+      <header className="aether-header">
+        <div className="aether-logo">
+          <div className="aether-icon-bg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="aether-icon">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              <path d="m19 8-7 7-7-7" />
+            </svg>
+            <span className="aether-sparkle">✨</span>
+          </div>
+          <div className="aether-logo-text">
+            <h1>Teacher AI</h1>
+            <p>Your personal AI coding teacher</p>
+          </div>
+        </div>
+        <div className="header-actions-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button 
+            className="icon-btn" 
+            title="Toggle Theme" 
+            onClick={() => setTheme(prev => prev === "vs-dark" ? "vs-light" : "vs-dark")}
+            style={{ marginRight: '8px' }}
+          >
+            {theme === "vs-dark" ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+            )}
+          </button>
+          <div className="header-actions-container" id="header-actions-portal">
+            {/* Action buttons will be portaled here from CodeEditor */}
+          </div>
+        </div>
+      </header>
 
-        <button
-          id="toggle-editor"
-          className={`toggle-btn toggle-btn--editor ${showEditor ? "toggle-btn--active" : ""}`}
-          onClick={() => setShowEditor((prev) => !prev)}
-        >
-          <span className="toggle-btn__icon">⚡</span>
-          <span className="toggle-btn__label">
-            {showEditor ? "Close Code Editor" : "Open Code Editor"}
-          </span>
-        </button>
-      </div>
-
-      <div className="workspace-shell workspace-shell--focus">
-        {noneOpen && (
-          <div className="landing-page landing-page--overlay">
-            <div className="landing-icon">🚀</div>
-            <h2 className="landing-title">Welcome to ExplainAI</h2>
-            <p className="landing-subtitle">
-              Your AI-powered learning assistant. Choose a tool above to get started.
-            </p>
-            <div className="landing-cards">
-              <div className="landing-card" onClick={() => setShowAgent(true)}>
-                <span className="landing-card__icon">✨</span>
-                <h3>AI Teacher</h3>
-                <p>Ask questions, upload documents, analyze YouTube videos</p>
-              </div>
-              <div className="landing-card" onClick={() => setShowEditor(true)}>
-                <span className="landing-card__icon">⚡</span>
-                <h3>Code Editor</h3>
-                <p>Write, run, and debug Python, C, and C++ code</p>
-              </div>
+      <div className="aether-layout">
+        <main className="workspace-canvas">
+          <div className="locked-workspace-grid">
+            <div className="locked-panel-left">
+              <ChatInterface
+                activeVideo={activeVideo}
+                onVideoDetect={setActiveVideo}
+                onTakeQuiz={() => setShowQuiz(true)}
+              />
+            </div>
+            
+            <div className="locked-panel-right">
+              <CodeEditor
+                activeVideo={activeVideo}
+                onTakeQuiz={() => setShowQuiz(true)}
+                theme={theme}
+              />
             </div>
           </div>
-        )}
-
-        <PanelGroup
-          id="workspace-root"
-          className="workspace-panels workspace-panels--focus"
-          orientation="horizontal"
-        >
-          <Panel
-            id="tutor-panel"
-            className="panel-shell panel-card tutor-panel"
-            panelRef={tutorPanelRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={58}
-            minSize={28}
-          >
-            <ChatInterface
-              activeVideo={activeVideo}
-              onVideoDetect={setActiveVideo}
-              onTakeQuiz={() => setShowQuiz(true)}
-            />
-          </Panel>
-
-          {showHandle && (
-            <PanelResizeHandle className="PanelResizeHandle PanelResizeHandle--col" />
-          )}
-
-          <Panel
-            id="workbench"
-            className="panel-shell panel-card workbench-panel"
-            panelRef={workbenchPanelRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={42}
-            minSize={22}
-          >
-            <CodeEditor
-              activeVideo={activeVideo}
-              onTakeQuiz={() => setShowQuiz(true)}
-            />
-          </Panel>
-        </PanelGroup>
+        </main>
       </div>
 
       {/* ── Focus Mode Quiz ── */}

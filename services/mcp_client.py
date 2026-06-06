@@ -60,6 +60,7 @@ if _MCP_AVAILABLE:
             "--memory", "256m",        # cap memory at 256 MB
             "--cpus", "0.5",           # cap CPU at 50 %
             "--pids-limit", "64",      # cap process count
+            "-e", "PYTHONUNBUFFERED=1",# Prevent stdout buffering
             "explainai-sandbox",       # image name (built from sandbox/Dockerfile)
         ],
     )
