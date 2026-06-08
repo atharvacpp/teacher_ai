@@ -80,6 +80,7 @@ ollama run deepseek-coder-v2   # For Autonomous Code Debugging
 ### 5. Build the Code Execution Sandbox
 Build the Docker image used for running user code safely:
 ```bash
+# run docker engine before this 
 cd sandbox
 docker build -t aethernet-sandbox .
 cd ..
