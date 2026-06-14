@@ -177,7 +177,7 @@ ollama pull llava
 ```
 
 ### 6. Build the Docker Sandbox
-
+and open the docker desktop app 
 ```bash
 cd sandbox
 docker build -t explainai-sandbox .
