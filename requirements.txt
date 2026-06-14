@@ -13,6 +13,7 @@ langgraph-prebuilt>=1.1.0
 mcp>=1.27.0
 groq>=0.37.0
 duckduckgo-search>=8.0.0
+ddgs>=9.0.0
 
 # ==========================================
 # Vector Store & Embeddings
