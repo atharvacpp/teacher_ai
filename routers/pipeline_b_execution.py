@@ -30,6 +30,7 @@ class ExecuteCodeResponse(BaseModel):
     language: str
     stderr: str | None = None
     fixed_code: str | None = None
+    images: list[str] = []
 
 
 @router.post("/execute-code", response_model=ExecuteCodeResponse)
@@ -53,9 +54,10 @@ async def execute_code(payload: ExecuteCodeRequest):
     stderr_output = None
     has_error = False
     attempts = 1
+    images = []
 
     try:
-        execution_output, has_error, stderr_output = await run_code(
+        execution_output, has_error, stderr_output, images = await run_code(
             code, language=language, user_input=user_input,
         )
     except Exception as exc:
@@ -70,6 +72,7 @@ async def execute_code(payload: ExecuteCodeRequest):
         language=language,
         stderr=stderr_output,
         fixed_code=None,
+        images=images,
     )
 
 

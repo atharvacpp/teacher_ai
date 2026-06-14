@@ -193,16 +193,13 @@ async def process_youtube_video(body: YouTubeRequest):
 async def upload_local_video(file: UploadFile = File(...)):
     """
     Accepts an uploaded local video file, extracts its audio using moviepy,
-    transcribes it using distil-whisper, and then generates an explanation
+    transcribes it using faster-whisper locally, and then generates an explanation
     using Qwen2.5.
     """
     import os
     import tempfile
-    import time
     from fastapi import UploadFile
-    from huggingface_hub import InferenceClient
-    from config import HF_API_KEY, ASR_MODEL_ID, MAX_RETRIES, RETRY_DELAY_SECONDS
-    from routers.voice import _is_model_loading
+    from services.asr import transcribe_audio
 
     if not file.content_type or not file.content_type.startswith("video/"):
         raise HTTPException(
@@ -239,41 +236,20 @@ async def upload_local_video(file: UploadFile = File(...)):
         with open(tmp_audio_path, "rb") as af:
             audio_bytes = af.read()
 
-        # 4. Transcribe using Distil-Whisper
-        print("[video] Transcribing audio via Hugging Face...")
-        request_client = InferenceClient(
-            api_key=HF_API_KEY,
-            headers={"Content-Type": "audio/wav"},
-        )
-
-        last_exception = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                result = request_client.automatic_speech_recognition(
-                    audio=audio_bytes,
-                    model=ASR_MODEL_ID,
-                )
-                transcript_text = result.text  # type: ignore
-                break
-            except Exception as e:
-                last_exception = e
-                if _is_model_loading(e) and attempt < MAX_RETRIES:
-                    print(
-                        f"[video] Model is loading (attempt {attempt}/{MAX_RETRIES}). "
-                        f"Retrying in {RETRY_DELAY_SECONDS}s…"
-                    )
-                    time.sleep(RETRY_DELAY_SECONDS)
-                    continue
-                break
-        else:
-            # We only get here if we never broke out (failed all retries)
-            pass
-
-        if not transcript_text:
-            error_detail = str(last_exception) if last_exception else "Unknown ASR error"
+        # 4. Transcribe using faster-whisper locally
+        print("[video] Transcribing audio via faster-whisper...")
+        try:
+            transcript_text = transcribe_audio(audio_bytes)
+        except Exception as e:
             raise HTTPException(
                 status_code=502,
-                detail=f"Audio transcription failed: {error_detail}"
+                detail=f"Audio transcription failed: {str(e)}"
+            )
+
+        if not transcript_text:
+            raise HTTPException(
+                status_code=502,
+                detail="Audio transcription failed: No text returned."
             )
 
         print(f"Transcript length: {len(transcript_text)} chars")

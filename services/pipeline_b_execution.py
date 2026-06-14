@@ -30,6 +30,7 @@ class AgentStateB(TypedDict):
     execution_error: str | None
     has_error: bool
     debug_attempts: int
+    images: list[str]
 
 
 async def execution_node(state: AgentStateB, config: RunnableConfig) -> dict:
@@ -43,7 +44,7 @@ async def execution_node(state: AgentStateB, config: RunnableConfig) -> dict:
     language = state.get("code_language", "python")
 
     try:
-        output_text, has_error, stderr_text = await local_run_code(code, language=language)
+        output_text, has_error, stderr_text, images = await local_run_code(code, language=language)
         
         execution_error = stderr_text if has_error else None
 
@@ -57,6 +58,7 @@ async def execution_node(state: AgentStateB, config: RunnableConfig) -> dict:
             "execution_error": execution_error,
             "has_error": has_error,
             "debug_attempts": attempt,
+            "images": images,
         }
 
     except Exception as exc:
@@ -66,6 +68,7 @@ async def execution_node(state: AgentStateB, config: RunnableConfig) -> dict:
             "execution_error": str(exc),
             "has_error": True,
             "debug_attempts": attempt,
+            "images": [],
         }
 
 
@@ -168,6 +171,7 @@ async def stream_magic_wand(code: str, language: str) -> AsyncGenerator[str, Non
         "execution_output": "",
         "has_error": False,
         "debug_attempts": 0,
+        "images": [],
     }
 
     yield "data: " + json.dumps({"type": "log", "message": "Connecting to Local Sandbox..."}) + "\n\n"
@@ -175,6 +179,7 @@ async def stream_magic_wand(code: str, language: str) -> AsyncGenerator[str, Non
     latest_code = code
     latest_output = ""
     latest_has_error = False
+    latest_images = []
 
     try:
         yield "data: " + json.dumps({"type": "log", "message": "Spinning up Docker sandbox..."}) + "\n\n"
@@ -187,6 +192,7 @@ async def stream_magic_wand(code: str, language: str) -> AsyncGenerator[str, Non
                 if node_name == "execution":
                     latest_has_error = state_updates.get("has_error", False)
                     latest_output = state_updates.get("execution_output", latest_output)
+                    latest_images = state_updates.get("images", latest_images)
                     if "current_code" in state_updates:
                         latest_code = state_updates["current_code"]
 
@@ -206,7 +212,7 @@ async def stream_magic_wand(code: str, language: str) -> AsyncGenerator[str, Non
                     else:
                         yield "data: " + json.dumps({"type": "log", "message": "DeepSeek generated a patch. Re-testing in sandbox..."}) + "\n\n"
 
-        yield "data: " + json.dumps({"type": "success", "code": latest_code, "output": latest_output}) + "\n\n"
+        yield "data: " + json.dumps({"type": "success", "code": latest_code, "output": latest_output, "images": latest_images}) + "\n\n"
 
     except Exception as exc:
         print(f"[Magic Wand] Error: {exc}")

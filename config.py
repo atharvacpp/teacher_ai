@@ -24,17 +24,25 @@ if not HF_API_KEY:
         "Please add it to your .env file before starting the server."
     )
 
-# E2B Sandbox
-E2B_API_KEY: str | None = os.getenv("E2B_API_KEY")
-if not E2B_API_KEY:
-    print("WARNING: E2B_API_KEY is not set. Cloud Sandbox features will be disabled.")
+# Groq
+GROQ_API_KEY: str | None = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    print("WARNING: GROQ_API_KEY is not set. Pipeline C will be disabled.")
+
+# Pinecone
+PINECONE_API_KEY: str | None = os.getenv("PINECONE_API_KEY")
+if not PINECONE_API_KEY or PINECONE_API_KEY == "your-pinecone-api-key-here":
+    print("WARNING: PINECONE_API_KEY is not set. Self-RAG retrieval will fall back to web search.")
+    PINECONE_API_KEY = None
+
+PINECONE_INDEX_NAME: str = os.getenv("PINECONE_INDEX_NAME", "teacher-ai")
 
 # ---------------------------------------------------------------------------
 # Model IDs
 # ---------------------------------------------------------------------------
 
 CHAT_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"    # text reasoning (cloud)
-ASR_MODEL_ID  = "openai/whisper-large-v3-turbo"  # speech recognition (cloud)
+ASR_MODEL_ID  = "base"  # speech recognition (local faster-whisper)
 DEBUGGER_MODEL = "deepseek-coder-v2"          # autonomous debugging (local)
 OLLAMA_BASE_URL = "http://localhost:11434"    # local ollama instance
 

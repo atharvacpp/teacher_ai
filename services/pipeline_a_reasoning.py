@@ -16,7 +16,8 @@ from langgraph.graph import StateGraph, START, END
 from config import HF_API_KEY, CHAT_MODEL_ID
 from services.tts import generate_tts_audio
 
-REASONING_MODEL = CHAT_MODEL_ID       # "Qwen/Qwen2.5-7B-Instruct"
+REASONING_MODEL = "mistralai/Mistral-7B-Instruct-v0.3"
+
 _hf_client = InferenceClient(api_key=HF_API_KEY)
 
 
@@ -123,7 +124,7 @@ async def stream_pipeline_a(
     try:
         from services.hf_chat import stream_chat_response
         for chunk in stream_chat_response(
-            [{"role": "user", "content": prompt}], max_tokens=2048
+            [{"role": "user", "content": prompt}], max_tokens=2048, model=REASONING_MODEL
         ):
             full_text += chunk
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"

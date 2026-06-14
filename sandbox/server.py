@@ -16,6 +16,8 @@ This file is COPIED into the Docker image at build time — it does NOT
 run on the host machine.
 """
 
+import base64
+import glob
 import json
 import os
 import subprocess
@@ -36,10 +38,31 @@ RUN_TIMEOUT = 10
 
 # Supported languages and their compilers
 LANGUAGE_CONFIG = {
-    "python": None,                       # subprocess python3, no compiler
-    "c":      {"compiler": "gcc", "ext": ".c"},
-    "cpp":    {"compiler": "g++", "ext": ".cpp"},
+    "python":     None,
+    "c":          {"compiler": "gcc", "ext": ".c"},
+    "cpp":        {"compiler": "g++", "ext": ".cpp"},
+    "javascript": None,
+    "bash":       None,
+    "java":       None,
 }
+
+
+# ---------------------------------------------------------------------------
+# Image Capture
+# ---------------------------------------------------------------------------
+
+def _capture_images(tmpdir: str) -> list[str]:
+    """Scan tmpdir for images and return them as a list of base64 strings."""
+    images = []
+    for ext in ("*.png", "*.jpg", "*.jpeg"):
+        for filepath in glob.glob(os.path.join(tmpdir, ext)):
+            try:
+                with open(filepath, "rb") as f:
+                    b64_str = base64.b64encode(f.read()).decode("utf-8")
+                    images.append(b64_str)
+            except Exception as e:
+                print(f"Error reading image {filepath}: {e}")
+    return images
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +99,7 @@ def _run_python(code: str, user_input: str = "") -> dict:
             timeout=RUN_TIMEOUT,
             stdin=stdin_arg,
             input=input_data,
+            cwd=tmpdir,
         )
 
         stdout_text = result.stdout
@@ -90,9 +114,13 @@ def _run_python(code: str, user_input: str = "") -> dict:
     except Exception:
         error_text = traceback.format_exc()
     finally:
+        images = _capture_images(tmpdir) if os.path.exists(tmpdir) else []
         if os.path.exists(script_path):
             os.remove(script_path)
         if os.path.exists(tmpdir):
+            for file in os.listdir(tmpdir):
+                try: os.remove(os.path.join(tmpdir, file))
+                except Exception: pass
             os.rmdir(tmpdir)
 
     return {
@@ -100,6 +128,145 @@ def _run_python(code: str, user_input: str = "") -> dict:
         "stderr": stderr_text,
         "error": error_text,
         "compile_error": None,
+        "images": images,
+    }
+
+def _run_script(code: str, executor: str, ext: str, user_input: str = "") -> dict:
+    """
+    Execute an interpreted script (e.g. bash, node).
+    """
+    tmpdir = tempfile.mkdtemp(prefix="sandbox_")
+    script_path = os.path.join(tmpdir, f"script{ext}")
+
+    error_text = None
+    stdout_text = ""
+    stderr_text = ""
+
+    try:
+        with open(script_path, "w") as f:
+            f.write(code)
+
+        stdin_arg = subprocess.DEVNULL if not user_input else subprocess.PIPE
+        input_data = user_input if user_input else None
+
+        result = subprocess.run(
+            [executor, script_path],
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT,
+            stdin=stdin_arg,
+            input=input_data,
+            cwd=tmpdir,
+        )
+
+        stdout_text = result.stdout
+        stderr_text = result.stderr
+        if result.returncode != 0:
+            error_text = result.stderr.strip()
+            if not error_text:
+                error_text = f"Process exited with code {result.returncode}"
+
+    except subprocess.TimeoutExpired:
+        error_text = f"Timeout Error: execution exceeded {RUN_TIMEOUT}s limit."
+    except Exception:
+        error_text = traceback.format_exc()
+    finally:
+        images = _capture_images(tmpdir) if os.path.exists(tmpdir) else []
+        if os.path.exists(script_path):
+            os.remove(script_path)
+        if os.path.exists(tmpdir):
+            for file in os.listdir(tmpdir):
+                try: os.remove(os.path.join(tmpdir, file))
+                except Exception: pass
+            os.rmdir(tmpdir)
+
+    return {
+        "stdout": stdout_text,
+        "stderr": stderr_text,
+        "error": error_text,
+        "compile_error": None,
+        "images": images,
+    }
+
+
+def _run_java(code: str, user_input: str = "") -> dict:
+    """
+    Compile and run Java code. Assumes class is named Main.
+    """
+    compile_error = None
+    runtime_error = None
+    stdout_text = ""
+    stderr_text = ""
+
+    tmpdir = tempfile.mkdtemp(prefix="sandbox_")
+    src_path = os.path.join(tmpdir, "Main.java")
+
+    try:
+        with open(src_path, "w") as f:
+            f.write(code)
+
+        # Compile
+        compile_result = subprocess.run(
+            ["javac", src_path],
+            capture_output=True,
+            text=True,
+            timeout=COMPILE_TIMEOUT,
+            cwd=tmpdir,
+        )
+
+        if compile_result.returncode != 0:
+            compile_error = compile_result.stderr.strip()
+            return {
+                "stdout": "",
+                "stderr": "",
+                "error": None,
+                "compile_error": compile_error,
+            }
+
+        # Run
+        stdin_arg = subprocess.DEVNULL if not user_input else subprocess.PIPE
+        input_data = user_input if user_input else None
+
+        run_result = subprocess.run(
+            ["java", "-cp", tmpdir, "Main"],
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT,
+            stdin=stdin_arg,
+            input=input_data,
+            cwd=tmpdir,
+        )
+
+        stdout_text = run_result.stdout
+        stderr_text = run_result.stderr
+        if run_result.returncode != 0:
+            runtime_error = run_result.stderr.strip()
+            if not runtime_error:
+                runtime_error = f"Process exited with code {run_result.returncode}"
+
+    except subprocess.TimeoutExpired:
+        runtime_error = f"Timeout Error: execution exceeded {RUN_TIMEOUT}s limit."
+    except Exception:
+        runtime_error = traceback.format_exc()
+    finally:
+        images = _capture_images(tmpdir) if os.path.exists(tmpdir) else []
+        if os.path.exists(src_path):
+            os.remove(src_path)
+        class_file = os.path.join(tmpdir, "Main.class")
+        if os.path.exists(class_file):
+            os.remove(class_file)
+        if os.path.exists(tmpdir):
+            for file in os.listdir(tmpdir):
+                try: os.remove(os.path.join(tmpdir, file))
+                except Exception: pass
+            os.rmdir(tmpdir)
+
+    return {
+        "stdout": stdout_text,
+        "stderr": stderr_text,
+        "error": runtime_error,
+        "compile_error": compile_error,
+        "images": images,
     }
 
 
@@ -139,6 +306,7 @@ def _run_compiled(code: str, language: str, user_input: str = "") -> dict:
             capture_output=True,
             text=True,
             timeout=COMPILE_TIMEOUT,
+            cwd=tmpdir,
         )
 
         if compile_result.returncode != 0:
@@ -161,6 +329,7 @@ def _run_compiled(code: str, language: str, user_input: str = "") -> dict:
             timeout=RUN_TIMEOUT,
             stdin=stdin_arg,
             input=input_data,
+            cwd=tmpdir,
         )
 
         stdout_text = run_result.stdout
@@ -175,10 +344,14 @@ def _run_compiled(code: str, language: str, user_input: str = "") -> dict:
     except Exception:
         runtime_error = traceback.format_exc()
     finally:
+        images = _capture_images(tmpdir) if os.path.exists(tmpdir) else []
         for path in (src_path, bin_path):
             if os.path.exists(path):
                 os.remove(path)
         if os.path.exists(tmpdir):
+            for file in os.listdir(tmpdir):
+                try: os.remove(os.path.join(tmpdir, file))
+                except Exception: pass
             os.rmdir(tmpdir)
 
     return {
@@ -186,6 +359,7 @@ def _run_compiled(code: str, language: str, user_input: str = "") -> dict:
         "stderr": stderr_text,
         "error": runtime_error,
         "compile_error": compile_error,
+        "images": images,
     }
 
 
@@ -216,17 +390,58 @@ def execute_code(
         payload = json.dumps({
             "stdout": "",
             "stderr": "",
-            "error": f"Unsupported language: '{language}'. Use python, c, or cpp.",
+            "error": f"Unsupported language: '{language}'. Use python, c, cpp, javascript, java, or bash.",
             "compile_error": None,
+            "images": [],
         })
         return payload
 
     if language == "python":
         result = _run_python(code, user_input=user_input)
+    elif language == "javascript":
+        result = _run_script(code, "node", ".js", user_input=user_input)
+    elif language == "bash":
+        result = _run_script(code, "bash", ".sh", user_input=user_input)
+    elif language == "java":
+        result = _run_java(code, user_input=user_input)
     else:
         result = _run_compiled(code, language, user_input=user_input)
 
     return json.dumps(result)
+
+
+@mcp.tool()
+def execute_bash_command(command: str) -> str:
+    """
+    Execute an arbitrary Bash command inside the sandbox container.
+    This gives autonomous agents the ability to run pip install, npm install,
+    or investigate the file system.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=RUN_TIMEOUT
+        )
+        return json.dumps({
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode
+        })
+    except subprocess.TimeoutExpired:
+        return json.dumps({
+            "stdout": "",
+            "stderr": f"Timeout Error: Command exceeded {RUN_TIMEOUT}s limit.",
+            "returncode": 1
+        })
+    except Exception as e:
+        return json.dumps({
+            "stdout": "",
+            "stderr": str(e),
+            "returncode": 1
+        })
 
 
 # ---------------------------------------------------------------------------

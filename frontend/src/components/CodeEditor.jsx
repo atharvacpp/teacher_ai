@@ -14,7 +14,6 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
 import Editor from "@monaco-editor/react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -276,14 +275,14 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
 
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
-    const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : "cpp";
+    const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : newLang === "javascript" ? "js" : newLang === "java" ? "java" : newLang === "bash" ? "sh" : "cpp";
     const newDefaultCode = getLanguageConfig(newLang).defaultCode;
 
     setFiles(prev => prev.map(f => {
       if (f.id === activeFileId) {
         let newName = f.name;
         // Strip common extensions and append the new one
-        newName = newName.replace(/\.(py|c|cpp|js|txt)$/i, '');
+        newName = newName.replace(/\.(py|c|cpp|js|java|sh|txt)$/i, '');
         newName = `${newName}.${ext}`;
 
         // Update content to new default if it's currently empty or matches the old default
@@ -519,10 +518,6 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
 
   // -----------------------------------------------------------------------
   // Render
-  const [headerPortalTarget, setHeaderPortalTarget] = useState(null);
-  useEffect(() => {
-    setHeaderPortalTarget(document.getElementById("header-actions-portal"));
-  }, []);
 
   const headerActions = (
     <>
@@ -612,23 +607,16 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
           )}
         </button>
 
-        {/* 🎯 Take Quiz Button */}
-        <button
-          id="take-quiz-button"
-          className="run-button run-button--outline"
-          onClick={onTakeQuiz}
-          disabled={!transcriptLoaded}
-          title={transcriptLoaded ? "Enter Focus Mode — AI-generated quiz from this video" : "Waiting for transcript to load..."}
-        >
-          🎯 Take Quiz
-        </button>
       </div>
     </>
   );
 
   return (
     <div className="code-editor-container">
-      {headerPortalTarget && createPortal(headerActions, headerPortalTarget)}
+      {/* ── Inline Toolbar (was previously portalled to old header) ── */}
+      <div className="code-editor-toolbar">
+        {headerActions}
+      </div>
 
       {/* Top Pane: Monaco Editor */}
       <div className={`editor-pane ${isEditorExpanded ? "expanded-pane" : ""}`}>
@@ -655,6 +643,9 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
                          if (newName.endsWith(".py")) newLang = "python";
                          else if (newName.endsWith(".c")) newLang = "c";
                          else if (newName.endsWith(".cpp")) newLang = "cpp";
+                         else if (newName.endsWith(".js")) newLang = "javascript";
+                         else if (newName.endsWith(".java")) newLang = "java";
+                         else if (newName.endsWith(".sh")) newLang = "bash";
                          
                          setFiles(prev => prev.map(pf => pf.id === f.id ? {...pf, name: newName, language: newLang} : pf));
                        }
@@ -688,7 +679,7 @@ export default function CodeEditor({ initialCode = "", initialLang = "python", a
               onClick={() => {
                 const newId = Date.now().toString();
                 const newLang = selectedLang;
-                const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : "cpp";
+                const ext = newLang === "python" ? "py" : newLang === "c" ? "c" : newLang === "javascript" ? "js" : newLang === "java" ? "java" : newLang === "bash" ? "sh" : "cpp";
                 const langConfig = getLanguageConfig(newLang);
                 
                 setFiles(prev => [...prev, { 

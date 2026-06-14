@@ -1,5 +1,5 @@
 # =============================================================================
-# .gitignore — Multimodal AI Explainer Platform
+# .gitignore — Teacher AI: Multimodal AI Coding Tutor
 # =============================================================================
 
 # ---------- Environment & Secrets ----------
@@ -62,11 +62,17 @@ sandbox/__pycache__/
 sandbox/smoke_test.py
 debug/
 scratch/
-_test_*.py
-test.pdf
 *.log
 *.bak
 *.tmp
+
+# ---------- Test Files & Dev Notebooks ----------
+test_*.py
+ws_test.py
+test_out.png
+scratch_*.py
+system_blueprint.ipynb
+run_server.py
 
 # ---------- OS & IDE Files ----------
 .DS_Store

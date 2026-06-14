@@ -99,6 +99,7 @@ async function readStream(response, {
   onTranscript,
   onDone,
   onStatus,
+  onSandboxArtifact,
 }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -160,6 +161,8 @@ async function readStream(response, {
             if (onAudio && audioPayload) onAudio(audioPayload);
           } else if (data.type === "error") {
             streamError = new Error(data.content || data.message);
+          } else if (data.type === "sandbox_artifact") {
+            if (onSandboxArtifact) onSandboxArtifact(data.artifact);
           } else if (data.type === "done") {
             fireTextComplete();
           }
@@ -571,3 +574,72 @@ export async function generateQuiz(videoId, videoTitle, videoTranscript) {
     activeController = null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// POST /generate-lesson — Pipeline C
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a comprehensive lesson via Pipeline C using a topic.
+ */
+export async function generateLesson(topic, onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete, onSandboxArtifact) {
+  activeController = new AbortController();
+  const { signal } = activeController;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/generate-lesson`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `Server error (${response.status})`);
+    }
+
+    await readStream(response, { onChunk, onAudio, onTranscript, onDone, onStatus, onTextComplete, onSandboxArtifact });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Generation stopped by user.", { cause: error });
+    }
+    console.error("[api] generateLesson failed:", error);
+    throw error;
+  } finally {
+    activeController = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/ingest_memory — Upload file to AI Long-Term Memory
+// ---------------------------------------------------------------------------
+
+/**
+ * Upload a file to be chunked, embedded, and stored in Pinecone vector DB.
+ *
+ * @param {File} file - The file to upload.
+ * @returns {Promise<{status: string, message: string, chunks_created: number}>}
+ */
+export async function ingestMemory(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/ingest_memory`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `Upload failed (${response.status})`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("[api] ingestMemory failed:", error);
+    throw error;
+  }
+}
+

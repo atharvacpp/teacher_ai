@@ -492,12 +492,28 @@ export default function ChatInterface({ activeVideo, onVideoDetect, onTakeQuiz }
             </p>
           </div>
         </div>
-        <button className="new-chat-btn" onClick={() => setMessages([])}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: "6px", verticalAlign: "-2px"}}>
-             <path d="M12 5v14M5 12h14"/>
-          </svg>
-          New Chat
-        </button>
+        <div className="chat-header-actions" style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className="new-chat-btn" 
+            onClick={onTakeQuiz}
+            disabled={!activeVideo?.transcript}
+            title={activeVideo?.transcript ? "Take a quiz based on the loaded video transcript" : "Load a YouTube video first to take a quiz"}
+            style={{ 
+              background: 'transparent', 
+              border: '1px solid var(--color-border)', 
+              opacity: !activeVideo?.transcript ? 0.5 : 1,
+              cursor: !activeVideo?.transcript ? 'not-allowed' : 'pointer'
+            }}
+          >
+            🎯 Take Quiz
+          </button>
+          <button className="new-chat-btn" onClick={() => setMessages([])}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: "6px", verticalAlign: "-2px"}}>
+               <path d="M12 5v14M5 12h14"/>
+            </svg>
+            New Chat
+          </button>
+        </div>
       </header>
 
       {/* ---- Message Area ---- */}
